@@ -1,0 +1,11 @@
+pycache/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+election_data.db
+attachments/
+.DS_Store
+.vscode/
