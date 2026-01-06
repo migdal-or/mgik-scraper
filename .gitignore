@@ -9,3 +9,5 @@ election_data.db
 attachments/
 .DS_Store
 .vscode/
+.env
+*.json
