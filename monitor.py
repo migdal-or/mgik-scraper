@@ -39,7 +39,7 @@ def fetch_mgik_news():
     proxy_pass = os.getenv("MGIK_PROXY_PASS")
 
     proxies = None
-    if proxy_host:
+    if proxy_host and proxy_port and proxy_user and proxy_pass:
         proxy_url = f"socks5://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
         proxies = {"http": proxy_url, "https": proxy_url}
 
