@@ -100,13 +100,13 @@ def main():
     """
 
     # # Fetch live data from MGIK API
-    data = fetch_mgik_news()
-    print(f"Fetched {len(data)} items from MGIK API")
-    with open("solutions.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    # data = fetch_mgik_news()
+    # print(f"Fetched {len(data)} items from MGIK API")
+    # with open("solutions.json", "w", encoding="utf-8") as f:
+    #     json.dump(data, f, ensure_ascii=False, indent=2)
 
     # Load from local solutions file
-    # data = load_decisions_file("solutions.json")
+    data = load_decisions_file("solutions.json")
     if not (items := data.get("items")):
         raise ValueError("No 'items' found in solutions.json")
 
