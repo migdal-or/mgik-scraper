@@ -1,13 +1,16 @@
 """
-Currently main module for MGIK news monitoring pipeline.
+A module that fetches news data from the MosGorIzbirKom (MGIK) API, processes it,
+and saves it to a local SQLite database using the DecisionsDatabase class.
 """
 
 import os
 import json
+import random
 import requests
-from dotenv import load_dotenv
-from datastore import DecisionsDatabase
 import urllib3
+from dotenv import load_dotenv
+from datetime import date
+from datastore import DecisionsDatabase
 
 # Disable insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -27,13 +30,17 @@ proxy_port = os.getenv("MGIK_PROXY_PORT")
 proxy_user = os.getenv("MGIK_PROXY_USER")
 proxy_pass = os.getenv("MGIK_PROXY_PASS")
 
-proxies = None
+earliest_date_str = os.getenv("MGIK_EARLIEST_DATE")
+earliest_date = date.strptime(earliest_date_str, "%Y-%m-%d")
+
 if proxy_host and proxy_port and proxy_user and proxy_pass:
     proxy_url = f"socks5://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
-    proxies = {"http": proxy_url, "https": proxy_url}
+    PROXIES = {"http": proxy_url, "https": proxy_url}
+else:
+    PROXIES = None
 
 
-def fetch_mgik_news(mgik_news_url: str) -> dict:
+def fetch_mgik_news(mgik_url: str) -> dict:
     """
     Fetch news data from MGIK API endpoint.
 
@@ -46,9 +53,9 @@ def fetch_mgik_news(mgik_news_url: str) -> dict:
 
     try:
         resp = requests.get(
-            mgik_news_url,
+            mgik_url,
             headers=mgik_headers,
-            proxies=proxies,
+            proxies=PROXIES,
             timeout=request_timeout,
             verify=False,
         )
@@ -62,8 +69,6 @@ def fetch_mgik_news(mgik_news_url: str) -> dict:
         return {"status": "error", "error": f"MGIK HTTP {e.response.status_code}"}
     except json.JSONDecodeError:
         return {"status": "error", "error": "MGIK invalid JSON response"}
-    except Exception as e:
-        return {"status": "error", "error": f"Unexpected: {str(e)[:100]}"}
 
 
 def load_decisions_file(filepath: str) -> dict:
@@ -134,6 +139,17 @@ def load_decisions_from_web_to_database():
             print("No 'items' found in input data")
             break
 
+        # look for oldest date in items
+        oldest_date_in_items = min(
+            date.strptime(item["date"], "%Y-%m-%d") or earliest_date for item in items
+        )
+        if oldest_date_in_items < earliest_date:
+            print(
+                f"Oldest date in items {oldest_date_in_items} "
+                "is less than setup earliest date "
+                f"{earliest_date}, stopping pagination."
+            )
+
         new_count = save_to_database(items)
         print(
             f"Inserted {new_count} new records, {len(items) - new_count} duplicates skipped"
@@ -153,15 +169,62 @@ def load_decisions_from_web_to_database():
         print(f"Fetching next page: {current_url}")
 
 
-def main():
+def process_attachments():
     """
-    Main execution function for MGIK news processing pipeline.
+    List all files in attchments/ directory.
+    List all attachments in the database.
+    Understand which attachments are missing.
+    Load missing attachments by downloading them.
 
-    Orchestrates data fetching (commented), file loading, and database persistence.
-    Provides logging for debugging and monitoring pipeline execution.
+    Uses DecisionsDatabase to find and download missing attachments.
     """
-    load_decisions_from_web_to_database()
 
+    db = DecisionsDatabase()
+    links_to_files_in_db = db.get_all_files()
+    # it's a list like ['http://www.mosgorizbirkom.ru/documents/69395/CustomDocument_69395.pdf', 'http://www.mosgorizbirkom.ru/documents/69384/CustomDocument_69384.pdf']
+    links_and_filenames_in_db = [
+        {"link": link, "filename": link.split("/")[-1]} for link in links_to_files_in_db
+    ]
 
-if __name__ == "__main__":
-    main()
+    os.makedirs("attachments", exist_ok=True)
+    files_in_attachments_dir = os.listdir("attachments/")
+
+    missing_attachments = [
+        x
+        for x in links_and_filenames_in_db
+        if x["filename"] not in files_in_attachments_dir
+    ]
+
+    # Shuffle the missing attachments list
+    random.shuffle(missing_attachments)
+
+    failed_downloads = []
+
+    for file in missing_attachments:
+        print(
+            f"Downloading missing attachment: {file['filename']} from link {file['link']}"
+        )
+        try:
+            response = requests.get(
+                file["link"],
+                proxies=PROXIES,
+                headers=mgik_headers,
+                timeout=request_timeout,
+                stream=True,
+                verify=False,
+            )
+
+            response.raise_for_status()  # Raise an error for HTTP codes 4xx/5xx
+
+            # Save the file to the attachments directory
+            with open(f"attachments/{file['filename']}", "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            print(f"Downloaded: {file['filename']}")
+
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to download {file['filename']} from {file['link']}: {e}")
+            failed_downloads.append(file)
+
+    return failed_downloads

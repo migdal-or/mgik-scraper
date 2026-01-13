@@ -75,7 +75,7 @@ class DecisionsDatabase:
 
         Returns:
             int: Number of new records inserted (duplicates skipped).
-        
+
         Deduplication handled by UNIQUE constraint with INSERT OR IGNORE.
         """
 
@@ -103,6 +103,22 @@ class DecisionsDatabase:
             )
             conn.commit()
             return cursor.rowcount
+
+    def get_all_files(self) -> List[str]:
+        """
+        Fetch all unique decision file URLs.
+
+        Returns:
+            List of unique file URLs.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                SELECT DISTINCT file
+                FROM decisions
+                """
+            )
+            return [row[0] for row in cursor.fetchall()]
 
     def get_all(self) -> List[Dict]:
         """
