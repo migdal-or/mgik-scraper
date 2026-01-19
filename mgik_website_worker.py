@@ -6,10 +6,10 @@ and saves it to a local SQLite database using the DecisionsDatabase class.
 import os
 import json
 import random
+from datetime import datetime
 import requests
 import urllib3
 from dotenv import load_dotenv
-from datetime import date
 from datastore import DecisionsDatabase
 
 # Disable insecure request warnings
@@ -19,7 +19,7 @@ load_dotenv()
 
 mgik_news_url = os.getenv("MGIK_NEWS_URL")
 mgik_headers = json.loads(os.getenv("MGIK_HEADERS", "{}"))
-request_timeout = int(os.getenv("REQUEST_TIMEOUT"))
+request_timeout = int(os.getenv("REQUEST_TIMEOUT", "0"))
 
 if not mgik_news_url:
     raise ValueError("MGIK_NEWS_URL variable must be set in a .env file")
@@ -30,8 +30,8 @@ proxy_port = os.getenv("MGIK_PROXY_PORT")
 proxy_user = os.getenv("MGIK_PROXY_USER")
 proxy_pass = os.getenv("MGIK_PROXY_PASS")
 
-earliest_date_str = os.getenv("MGIK_EARLIEST_DATE")
-earliest_date = date.strptime(earliest_date_str, "%Y-%m-%d")
+earliest_date_str = os.getenv("MGIK_EARLIEST_DATE", "1970-01-01")
+earliest_date = datetime.strptime(earliest_date_str, "%Y-%m-%d")
 
 if proxy_host and proxy_port and proxy_user and proxy_pass:
     proxy_url = f"socks5://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
@@ -141,7 +141,7 @@ def load_decisions_from_web_to_database():
 
         # look for oldest date in items
         oldest_date_in_items = min(
-            date.strptime(item["date"], "%Y-%m-%d") or earliest_date for item in items
+            datetime.strptime(item["date"], "%Y-%m-%d") for item in items
         )
         if oldest_date_in_items < earliest_date:
             print(
@@ -149,6 +149,7 @@ def load_decisions_from_web_to_database():
                 "is less than setup earliest date "
                 f"{earliest_date}, stopping pagination."
             )
+            break
 
         new_count = save_to_database(items)
         print(
@@ -181,7 +182,8 @@ def process_attachments():
 
     db = DecisionsDatabase()
     links_to_files_in_db = db.get_all_files()
-    # it's a list like ['http://www.mosgorizbirkom.ru/documents/69395/CustomDocument_69395.pdf', 'http://www.mosgorizbirkom.ru/documents/69384/CustomDocument_69384.pdf']
+    # it's a list like ['http://www.mosgorizbirkom.ru/documents/69395/CustomDocument_69395.pdf',
+    # 'http://www.mosgorizbirkom.ru/documents/69384/CustomDocument_69384.pdf']
     links_and_filenames_in_db = [
         {"link": link, "filename": link.split("/")[-1]} for link in links_to_files_in_db
     ]
