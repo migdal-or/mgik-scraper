@@ -21,8 +21,8 @@ def setup_logging(config):
     # File handler with rotation
     file_handler = RotatingFileHandler(
         config["LOG_FILE"],
-        maxBytes=config.get("LOG_MAX_BYTES", 10485760),
-        backupCount=config.get("LOG_BACKUP_COUNT", 5),
+        maxBytes=config.get("LOG_MAX_BYTES"),
+        backupCount=config.get("LOG_BACKUP_COUNT"),
     )
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
