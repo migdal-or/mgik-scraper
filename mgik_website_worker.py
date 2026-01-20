@@ -6,11 +6,15 @@ and saves it to a local SQLite database using the DecisionsDatabase class.
 import os
 import json
 import random
+import logging
 from datetime import datetime
 import requests
 import urllib3
 from dotenv import load_dotenv
 from datastore import DecisionsDatabase
+
+# Setup logger
+logger = logging.getLogger('mgik-scraper')
 
 # Disable insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -71,6 +75,46 @@ def fetch_mgik_news(mgik_url: str) -> dict:
         return {"status": "error", "error": "MGIK invalid JSON response"}
 
 
+def fetch_attachment(url: str, save_path: str) -> dict:
+    """
+    Download PDF attachment using existing proxy/timeout/header configuration.
+    Extracted from existing process_attachments() function (lines 210-226).
+
+    Args:
+        url: Full URL to the PDF file
+        save_path: Local filesystem path to save the file
+
+    Returns: {"status": "success"/"error", "error": ...}
+    """
+    try:
+        response = requests.get(
+            url,
+            proxies=PROXIES,
+            headers=mgik_headers,
+            timeout=request_timeout,
+            stream=True,
+            verify=False,  # Maintain existing SSL behavior
+        )
+
+        response.raise_for_status()  # Raise error for HTTP 4xx/5xx
+
+        # Save file with streaming (existing 8KB chunk pattern)
+        with open(save_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        return {"status": "success"}
+
+    except requests.exceptions.Timeout:
+        return {"status": "error", "error": f"Timeout ({request_timeout}s)"}
+    except requests.exceptions.ConnectionError as e:
+        return {"status": "error", "error": f"Connection failed: {e}"}
+    except requests.exceptions.HTTPError as e:
+        return {"status": "error", "error": f"HTTP {e.response.status_code}"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 def load_decisions_file(filepath: str) -> dict:
     """
     Load decisions data from JSON decisions file.
@@ -128,15 +172,15 @@ def load_decisions_from_web_to_database():
         # Fetch data from the current URL
         result = fetch_mgik_news(current_url)
         if result["status"] != "success":
-            print(f"Fetch failed: {result['error']}")
+            logger.error(f"Fetch failed: {result['error']}")
             break
 
         data = result["data"]
-        print(f"Fetched {len(data)} items from MGIK API")
+        logger.info(f"Fetched {len(data)} items from MGIK API")
 
         # Extract items and save them to the database
         if not (items := data.get("items")):
-            print("No 'items' found in input data")
+            logger.warning("No 'items' found in input data")
             break
 
         # look for oldest date in items
@@ -144,7 +188,7 @@ def load_decisions_from_web_to_database():
             datetime.strptime(item["date"], "%Y-%m-%d") for item in items
         )
         if oldest_date_in_items < earliest_date:
-            print(
+            logger.info(
                 f"Oldest date in items {oldest_date_in_items} "
                 "is less than setup earliest date "
                 f"{earliest_date}, stopping pagination."
@@ -152,22 +196,22 @@ def load_decisions_from_web_to_database():
             break
 
         new_count = save_to_database(items)
-        print(
+        logger.info(
             f"Inserted {new_count} new records, {len(items) - new_count} duplicates skipped"
         )
 
         # Stop if no new records were inserted
         if new_count == 0:
-            print("No new records inserted, stopping pagination.")
+            logger.info("No new records inserted, stopping pagination.")
             break
 
         # Get the next page URL
         current_url = data.get("meta", {}).get("next")
         if not current_url:
-            print("No more pages available, stopping pagination.")
+            logger.info("No more pages available, stopping pagination.")
             break
 
-        print(f"Fetching next page: {current_url}")
+        logger.debug(f"Fetching next page: {current_url}")
 
 
 def process_attachments():
@@ -203,7 +247,7 @@ def process_attachments():
     failed_downloads = []
 
     for file in missing_attachments:
-        print(
+        logger.info(
             f"Downloading missing attachment: {file['filename']} from link {file['link']}"
         )
         try:
@@ -223,10 +267,10 @@ def process_attachments():
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            print(f"Downloaded: {file['filename']}")
+            logger.info(f"Downloaded: {file['filename']}")
 
         except requests.exceptions.RequestException as e:
-            print(f"Failed to download {file['filename']} from {file['link']}: {e}")
+            logger.error(f"Failed to download {file['filename']} from {file['link']}: {e}")
             failed_downloads.append(file)
 
     return failed_downloads
