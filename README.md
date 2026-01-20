@@ -8,12 +8,14 @@ A web scraper for the Moscow City Election Commission (MosGorIzbirKom) that moni
 
 ## Features
 
-- Smart JSON news scraping with automatic pagination
+- Background daemon with adaptive scheduling
+- RSS 2.0 feed generation
+- Smart PDF attachment downloads with failure threshold
+- Memory monitoring with automatic restart
 - Change detection and version tracking
-- Predictive scheduling (planned)
-- RSS feed generation (planned)
-- PDF attachment management
+- Logging with file rotation
 - SOCKS5 proxy support
+- Fail-fast configuration (no defaults)
 
 ## Quick Start
 
@@ -37,36 +39,53 @@ cp .env.example .env
 Create a `.env` file with the following variables:
 
 ```bash
-# Required: API endpoint
+# API Configuration
 MGIK_NEWS_URL=https://example.com/api
-
-# Required: HTTP headers (JSON format)
 MGIK_HEADERS={ "User-Agent": "Mozilla/5.0...", "Accept": "application/json" }
-
-# Required: Database path
-MGIK_DB_PATH=/path/to/database.db
-
-# Optional: Request timeout (default: 30)
+MGIK_DB_PATH=./mgik_news.db
 REQUEST_TIMEOUT=30
-
-# Optional: Stop pagination at this date
 MGIK_EARLIEST_DATE=2025-01-01
 
-# Optional: SOCKS5 proxy (all 4 required if using proxy)
-MGIK_PROXY_HOST=proxy.example.com
-MGIK_PROXY_PORT=1080
-MGIK_PROXY_USER=username
-MGIK_PROXY_PASS=password123
+# Proxy Configuration (optional - all 4 required if using proxy)
+MGIK_PROXY_HOST=
+MGIK_PROXY_PORT=
+MGIK_PROXY_USER=
+MGIK_PROXY_PASS=
+
+# Scheduler Configuration
+SCHEDULER_DEFAULT_INTERVAL=28800  # 8 hours in seconds
+SCHEDULER_MAX_INTERVAL=28800
+SCHEDULER_MAX_MEMORY_MB=500
+
+# RSS Feed Configuration
+OUTPUT_PATH=./mgik-feed.xml
+OUTPUT_MAX_ITEMS=100
+MGIK_BASE_URL=https://www.mosgorizbirkom.ru
+RSS_FEED_TITLE=MGIK Decisions Feed
+RSS_FEED_DESCRIPTION=Moscow City Election Commission decisions
+
+# Attachment Configuration
+ATTACHMENTS_DIR=./attachments
+ATTACHMENTS_MAX_FAILURES=3
+
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_FILE=./mgik-scraper.log
+LOG_MAX_BYTES=10485760  # 10 MB
+LOG_BACKUP_COUNT=5
 ```
 
 ### Running
 
 ```bash
-# Single run (fetches latest news)
-python mgik_scraper.py
+# Daemon mode (background loop with scheduler)
+python daemon.py
 
-# Enable attachment downloads (uncomment in mgik_scraper.py first)
-# python mgik_scraper.py
+# Or with nohup
+nohup python daemon.py &
+
+# Legacy CLI mode (one-shot scrape)
+python mgik_scraper.py
 ```
 
 ## Documentation

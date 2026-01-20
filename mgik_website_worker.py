@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from datastore import DecisionsDatabase
 
 # Setup logger
-logger = logging.getLogger('mgik-scraper')
+logger = logging.getLogger("mgik-scraper")
 
 # Disable insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -111,8 +111,8 @@ def fetch_attachment(url: str, save_path: str) -> dict:
         return {"status": "error", "error": f"Connection failed: {e}"}
     except requests.exceptions.HTTPError as e:
         return {"status": "error", "error": f"HTTP {e.response.status_code}"}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+    except (OSError, IOError) as e:
+        return {"status": "error", "error": f"File error: {e}"}
 
 
 def load_decisions_file(filepath: str) -> dict:
@@ -172,11 +172,11 @@ def load_decisions_from_web_to_database():
         # Fetch data from the current URL
         result = fetch_mgik_news(current_url)
         if result["status"] != "success":
-            logger.error(f"Fetch failed: {result['error']}")
-            break
+            logger.error("Fetch failed: %s", result["error"])
+            raise RuntimeError(f"Failed to fetch from MGIK API: {result['error']}")
 
         data = result["data"]
-        logger.info(f"Fetched {len(data)} items from MGIK API")
+        logger.info("Fetched data from MGIK API")
 
         # Extract items and save them to the database
         if not (items := data.get("items")):
@@ -189,15 +189,17 @@ def load_decisions_from_web_to_database():
         )
         if oldest_date_in_items < earliest_date:
             logger.info(
-                f"Oldest date in items {oldest_date_in_items} "
-                "is less than setup earliest date "
-                f"{earliest_date}, stopping pagination."
+                "Oldest date in items %s is less than setup earliest date %s, stopping pagination.",
+                oldest_date_in_items,
+                earliest_date,
             )
             break
 
         new_count = save_to_database(items)
         logger.info(
-            f"Inserted {new_count} new records, {len(items) - new_count} duplicates skipped"
+            "Inserted %s new records, %s duplicates skipped",
+            new_count,
+            len(items) - new_count,
         )
 
         # Stop if no new records were inserted
@@ -211,7 +213,7 @@ def load_decisions_from_web_to_database():
             logger.info("No more pages available, stopping pagination.")
             break
 
-        logger.debug(f"Fetching next page: {current_url}")
+        logger.debug("Fetching next page: %s", current_url)
 
 
 def process_attachments():
@@ -248,7 +250,9 @@ def process_attachments():
 
     for file in missing_attachments:
         logger.info(
-            f"Downloading missing attachment: {file['filename']} from link {file['link']}"
+            "Downloading missing attachment: %s from link %s",
+            file["filename"],
+            file["link"],
         )
         try:
             response = requests.get(
@@ -267,10 +271,12 @@ def process_attachments():
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            logger.info(f"Downloaded: {file['filename']}")
+            logger.info("Downloaded: %s", file["filename"])
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to download {file['filename']} from {file['link']}: {e}")
+            logger.error(
+                "Failed to download %s from %s: %s", file["filename"], file["link"], e
+            )
             failed_downloads.append(file)
 
     return failed_downloads

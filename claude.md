@@ -10,16 +10,52 @@ The MGIK Scraper is a web scraping system designed to monitor the Moscow City El
 
 ## Core Components
 
-### [mgik_scraper.py](mgik_scraper.py) - Main Entry Point (21 lines)
-Orchestrates the scraping and processing workflow.
+### [daemon.py](daemon.py) - Daemon Entry Point
+Main entry point for background execution.
 
-**Current workflow:**
-1. Calls `load_decisions_from_web_to_database()` to fetch and store news
-2. ~~Calls `process_attachments()` to download PDFs~~ (currently disabled, line 16)
+**Functions:**
+- `load_config()` - Loads configuration from .env (no defaults, fail-fast)
+- `setup_logging()` - Configures logging with file rotation
+- `main()` - Creates DaemonScheduler and runs main loop
 
-**Purpose**: Simple orchestration layer for coordinating data fetching and attachment processing.
+### [scheduler.py](scheduler.py) - Core Scheduler
+Main daemon loop that orchestrates all components in strict sequential order.
 
-### [mgik_website_worker.py](mgik_website_worker.py) - Core Scraping Logic (231 lines)
+**Execution order:**
+1. Fetch news (load_decisions_from_web_to_database)
+2. Download attachments (even if fetch failed)
+3. Generate RSS output (only if fetch succeeded)
+4. Memory check and suicide if threshold exceeded
+5. Sleep until next interval
+
+**Features:**
+- Adaptive intervals with exponential backoff on failures
+- Memory monitoring with psutil
+- No signal handling (SIGTERM, SIGINT removed)
+
+### [attachments.py](attachments.py) - Attachment Manager
+Manages PDF attachment downloads with failure threshold.
+
+**Features:**
+- Compares database URLs with local files to find missing attachments
+- Downloads with consecutive failure threshold (stops after N failures)
+- Reuses fetch_attachment() from mgik_website_worker
+- No SSH upload (moved to backlog)
+
+### [output.py](output.py) - RSS Generator
+Generates RSS 2.0 XML feed from decisions database.
+
+**Features:**
+- Reads all decisions from database
+- Sorts by date descending
+- Takes most recent N items
+- Atomic file writes (temp file + rename)
+- XML escaping for special characters
+
+### [mgik_scraper.py](mgik_scraper.py) - CLI Entry Point (legacy)
+Original one-shot scraper (still functional for manual runs).
+
+### [mgik_website_worker.py](mgik_website_worker.py) - Core Scraping Logic
 
 **Key Functions:**
 
@@ -29,9 +65,19 @@ HTTP client with proxy and timeout support.
 - **Returns**: `{"status": "success"/"error", "data": response_json, "error": error_msg}`
 - **Features**:
   - SOCKS5 proxy support (if all 4 proxy env vars are set)
-  - Configurable timeout (default: 30s)
-  - SSL verification disabled (`verify=False`) - exercise caution
+  - Configurable timeout
+  - SSL verification disabled (`verify=False`)
   - Custom headers from environment
+- **Logging**: Uses logging module with lazy formatting
+
+#### `fetch_attachment(url: str, save_path: str) -> dict`
+Download PDF attachment using existing proxy/timeout/header configuration.
+
+- **Returns**: `{"status": "success"/"error", "error": error_msg}`
+- **Features**:
+  - Reuses global PROXIES, mgik_headers, request_timeout
+  - Streaming download with 8KB chunks
+  - Specific exception handling (Timeout, ConnectionError, HTTPError, OSError, IOError)
 
 #### `load_decisions_from_web_to_database() -> None`
 Paginated API scraping with smart stopping conditions.
@@ -42,20 +88,15 @@ Paginated API scraping with smart stopping conditions.
   2. No items in response
   3. `oldest_date_in_items < MGIK_EARLIEST_DATE`
   4. No new records inserted (all duplicates)
-- **Progress tracking**: Prints page count, insert count, duplicate count per page
+- **Error handling**: Raises RuntimeError on fetch failure (enables proper backoff)
+- **Logging**: Uses logging module throughout
 - **Date filtering**: Extracts oldest date from each page to avoid fetching ancient data
 
-#### `process_attachments() -> None`
-PDF download manager with resilience features.
+#### `process_attachments() -> list`
+Legacy PDF download function (replaced by AttachmentManager).
 
-- **Strategy**:
-  1. Get all file URLs from database
-  2. List existing files in `attachments/` directory
-  3. Compute missing files (database - local)
-  4. Shuffle download order (randomize to avoid rate limiting patterns)
-  5. Stream download with 8KB chunks
-- **Error handling**: Tracks failed downloads in `failed_downloads` list
-- **Status**: Currently disabled in main script (see known issues)
+- **Status**: Still exists but superseded by attachments.py
+- Returns list of failed downloads
 
 ### [datastore.py](datastore.py) - Database Layer (149 lines)
 
@@ -106,10 +147,16 @@ process_attachments() - Download missing PDFs
 attachments/*.pdf (local filesystem)
 ```
 
-**Future flow additions:**
-- Publication pattern analysis → predictive scheduler
-- RSS feed generator ← database
-- SSH uploader → remote mirror server
+**Current daemon workflow:**
+1. Fetch news from API → database
+2. Download missing attachments (failure threshold)
+3. Generate RSS feed from database
+4. Memory check (exit if threshold exceeded)
+5. Sleep with adaptive interval (backoff on failures)
+
+**Future flow additions (backlog):**
+- Publication pattern analysis → predictive scheduler (#todo)
+- SSH uploader → remote mirror server (#todo)
 
 ### Database Schema
 
@@ -160,88 +207,89 @@ The Moscow City Election Commission publishes news as JSON via a React-based web
 
 ```
 mgik-scraper/
-├── mgik_scraper.py          # Entry point (21 lines)
-├── mgik_website_worker.py   # Scraping logic (231 lines)
-├── datastore.py             # Database layer (149 lines)
-├── test_process_attachments.py  # Manual test script
-├── requirements.txt         # 4 dependencies (requests, dotenv, pytest, pytest-mock)
+├── daemon.py                # Daemon entry point
+├── scheduler.py             # Core scheduler with memory monitoring
+├── attachments.py           # Attachment manager
+├── output.py                # RSS generator
+├── mgik_scraper.py          # Legacy CLI entry point
+├── mgik_website_worker.py   # Scraping logic with fetch_attachment
+├── datastore.py             # Database layer
+├── requirements.txt         # 5 dependencies (requests, dotenv, pytest, pytest-mock, psutil)
 ├── .env                     # Configuration (gitignored)
 ├── .env.example             # Configuration template
-├── mgik_news.db            # SQLite database (144 KB, ~1000s of records)
-├── solutions.json          # Sample API response (44 KB)
-├── attachments/            # Downloaded PDFs
-├── tests/                  # Test suite directory (empty, planned)
-└── README.md               # User-facing documentation
+├── mgik_news.db             # SQLite database
+├── attachments/             # Downloaded PDFs
+├── tests/                   # Test suite directory
+└── README.md                # User-facing documentation
 ```
 
 ## Implementation Status
 
 ### ✅ Implemented Features
 
+- **Background daemon mode**
+  - Continuous operation with sleep intervals
+  - Adaptive intervals with exponential backoff on failures
+  - Memory monitoring with suicide threshold (psutil)
+  - No signal handling (removed SIGTERM, SIGINT)
+
+- **RSS feed generation**
+  - Generates RSS 2.0 XML from database
+  - Atomic file writes (temp + rename)
+  - XML escaping for special characters
+  - Configurable max items
+
+- **Attachment downloads with failure threshold**
+  - Identifies missing files (database vs local)
+  - Downloads with consecutive failure threshold
+  - Runs even if fetch failed
+  - Reuses fetch_attachment() from mgik_website_worker
+
+- **Logging framework**
+  - Uses logging module throughout
+  - Lazy formatting with %s placeholders
+  - File rotation with RotatingFileHandler
+  - No print() statements
+
 - **JSON API scraping with pagination**
   - Follows `meta.next` links
   - Handles missing/malformed responses gracefully
   - Early stopping on date threshold
+  - Specific exception handling (no broad exceptions)
 
 - **SQLite database with versioning**
   - Automatic deduplication
   - Full history preservation
   - `fetched_at` timestamp tracking
 
-- **Duplicate detection**
-  - UNIQUE constraint at database level
-  - Returns count of new vs duplicate records
-
 - **Proxy support (SOCKS5)**
   - Configured via 4 environment variables
   - All-or-nothing (must set all 4 or none)
 
-- **Environment-based configuration**
-  - .env file with python-dotenv
-  - Required: MGIK_NEWS_URL, MGIK_HEADERS, MGIK_DB_PATH
-  - Optional: REQUEST_TIMEOUT, MGIK_EARLIEST_DATE, proxy settings
+- **Fail-fast configuration**
+  - No defaults in config loading
+  - Direct dictionary access (no .get() with defaults)
+  - Fails immediately if required values missing
 
-- **PDF URL construction**
-  - `build_pdf_url()` converts relative to absolute
-  - Base URL: https://www.mosgorizbirkom.ru
+### ⏳ Backlog Features
 
-### ⏳ Planned Features
-
-- **Predictive scheduling** (Phase 2)
+- **Predictive scheduling** (#todo)
   - Analyze `fetched_at` timestamps to find publication patterns
   - Build statistical model (time-of-day, day-of-week, intervals)
   - Predict next publish window
+  - Adaptive coefficient (1-32) for interval calculation
+  - Feedback loop: server unreachable → adjust coefficient
 
-- **Adaptive check frequency** (Phase 2)
-  - Normal: check every 8 hours
-  - During predicted publish window: check every 10 minutes
-  - Exponential backoff after failed predictions
-
-- **RSS feed generation** (Phase 3)
-  - Read from database
-  - Generate RSS 2.0 XML
-  - Items include: name, number, date, description with dual URLs
-
-- **Background daemon mode** (Phase 2)
-  - Continuous operation with sleep intervals
-  - Signal handling (SIGTERM, SIGHUP)
-  - Systemd service unit file
-
-- **Attachment retry logic** (Phase 3)
-  - Track failed downloads in database
-  - Retry on next successful API fetch
-  - Configurable max retries
-
-- **SSH upload** (Phase 3)
+- **SSH upload** (#todo)
   - Upload downloaded PDFs to remote server
   - URL mapping configuration
   - Dual-URL RSS items (original + mirror)
+  - Batch upload after downloads complete
 
 ## Known Issues & Technical Debt
 
 ### Security/Safety
 - **SSL verification disabled** (`verify=False` in requests calls)
-  - Location: [mgik_website_worker.py:60](mgik_website_worker.py#L60), [mgik_website_worker.py:214](mgik_website_worker.py#L214)
   - Reason: Unknown (possibly self-signed certificate on MGIK server?)
   - Action needed: Enable SSL or document why it must be disabled
 
@@ -249,67 +297,65 @@ mgik-scraper/
 - **No automated tests**
   - `tests/` directory exists but is empty
   - pytest and pytest-mock installed but unused
-  - Only manual test script: `test_process_attachments.py`
   - Action needed: Write pytest suite for core functions
 
-### Observability
-- **Uses `print()` instead of `logging` module**
-  - No log levels (DEBUG, INFO, WARNING, ERROR)
-  - No log file output
-  - No structured logging
-  - Action needed: Implement proper logging framework
+### Configuration
+- **.env expressions not supported**
+  - Cannot use `8*3600` in .env file
+  - Must use actual numbers (28800)
+  - Expressions only work in Python, not in .env parsing
 
-### Features
-- **Attachment processing disabled**
-  - Line 16 in [mgik_scraper.py](mgik_scraper.py#L16) is commented out
-  - Reason: Unknown (possibly incomplete/untested?)
-  - Action needed: Enable and test, or remove if not needed
+### Error Handling
+- **Fetch failures now properly propagate**
+  - Fixed: `load_decisions_from_web_to_database()` now raises RuntimeError on fetch failure
+  - This enables proper backoff behavior in scheduler
+  - Previously: failures were silently caught and treated as success
 
 ## Configuration Details
 
 ### Environment Variables
 
-All configuration via `.env` file loaded with python-dotenv.
+All configuration via `.env` file loaded with python-dotenv. **No defaults** - configuration fails immediately if required values are missing.
 
 #### Required Variables
 
 - **MGIK_NEWS_URL**: API endpoint for JSON news feed
-  - Example: `https://www.mosgorizbirkom.ru/api/news`
-  - Type: String (URL)
-  - Used in: `load_decisions_from_web_to_database()` as starting point
-
-- **MGIK_HEADERS**: HTTP headers as JSON string
-  - Example: `{ "User-Agent": "Mozilla/5.0...", "Accept": "application/json" }`
-  - Type: JSON string (parsed with `json.loads()`)
-  - Used in: `fetch_mgik_news()` for all requests
-  - Purpose: Mimic browser to avoid bot detection
-
 - **MGIK_DB_PATH**: Path to SQLite database file
-  - Example: `/path/to/mgik_news.db` or `mgik_news.db` (relative)
-  - Type: String (file path)
-  - Used in: `DecisionsDatabase` constructor
+- **MGIK_HEADERS**: HTTP headers as JSON string
 
-#### Optional Variables
+#### Scheduler Configuration
 
-- **REQUEST_TIMEOUT**: HTTP request timeout in seconds
-  - Default: `30` (if not set or invalid)
-  - Type: Integer
-  - Used in: `fetch_mgik_news()` for `requests.get(timeout=...)`
+- **SCHEDULER_DEFAULT_INTERVAL**: Default check interval in seconds (e.g., 28800 for 8 hours)
+- **SCHEDULER_MAX_INTERVAL**: Maximum interval in seconds
+- **SCHEDULER_MAX_MEMORY_MB**: Memory suicide threshold in MB
 
-- **MGIK_EARLIEST_DATE**: Stop pagination at this date
-  - Default: `1970-01-01` (effectively no limit)
-  - Format: `YYYY-MM-DD`
-  - Type: String (parsed with `datetime.strptime()`)
-  - Used in: `load_decisions_from_web_to_database()` to avoid fetching old data
-  - Logic: If `oldest_date_in_items < earliest_date`, stop pagination
+#### RSS Feed Configuration
+
+- **OUTPUT_PATH**: Path to RSS XML output file
+- **OUTPUT_MAX_ITEMS**: Maximum number of items in RSS feed
+- **MGIK_BASE_URL**: Base URL for MGIK website
+- **RSS_FEED_TITLE**: RSS feed title
+- **RSS_FEED_DESCRIPTION**: RSS feed description
+
+#### Attachments Configuration
+
+- **ATTACHMENTS_DIR**: Directory for downloaded PDFs
+- **ATTACHMENTS_MAX_FAILURES**: Consecutive failure threshold
+
+#### Logging Configuration
+
+- **LOG_LEVEL**: Logging level (INFO, DEBUG, WARNING, ERROR)
+- **LOG_FILE**: Path to log file
+- **LOG_MAX_BYTES**: Max log file size before rotation
+- **LOG_BACKUP_COUNT**: Number of backup log files
+
+#### Optional Proxy Variables
 
 - **MGIK_PROXY_HOST**: SOCKS5 proxy hostname
 - **MGIK_PROXY_PORT**: SOCKS5 proxy port
 - **MGIK_PROXY_USER**: SOCKS5 proxy username
 - **MGIK_PROXY_PASS**: SOCKS5 proxy password
-  - All 4 required if using proxy (checked at runtime)
-  - Used to build: `socks5://user:pass@host:port`
-  - Used in: `fetch_mgik_news()` as `proxies` parameter
+  - All 4 required if using proxy
 
 ## Error Handling Patterns
 

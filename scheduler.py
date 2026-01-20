@@ -5,16 +5,15 @@ Main event loop that orchestrates fetch, attachments, output generation,
 and memory monitoring in strict sequential order.
 """
 
-import psutil
 import os
-import signal
 import time
 import logging
+import psutil
 from mgik_website_worker import load_decisions_from_web_to_database
 from attachments import AttachmentManager
 from output import RSSGenerator
 
-logger = logging.getLogger('mgik-scraper')
+logger = logging.getLogger("mgik-scraper")
 
 
 class DaemonScheduler:
@@ -29,22 +28,22 @@ class DaemonScheduler:
         """
         self.config = config
         self.running = True
-        self.current_interval = config['SCHEDULER_DEFAULT_INTERVAL']
-        self.max_interval = config['SCHEDULER_MAX_INTERVAL']
-        self.max_memory_mb = config.get('SCHEDULER_MAX_MEMORY_MB', 500)
+        self.current_interval = config["SCHEDULER_DEFAULT_INTERVAL"]
+        self.max_interval = config["SCHEDULER_MAX_INTERVAL"]
+        self.max_memory_mb = config.get("SCHEDULER_MAX_MEMORY_MB")
 
         # Initialize components
         self.attachment_mgr = AttachmentManager(config)
         self.output_gen = RSSGenerator(config)
 
         logger.info(
-            f"Scheduler initialized: interval={self.current_interval}s, "
-            f"max_memory={self.max_memory_mb}MB"
+            "Scheduler initialized: interval=%ss, max_memory=%sMB",
+            self.current_interval,
+            self.max_memory_mb,
         )
 
     def run(self):
         """Main event loop - runs until stopped"""
-        self.setup_signal_handlers()
         logger.info("Starting main scheduler loop")
 
         while self.running:
@@ -57,9 +56,8 @@ class DaemonScheduler:
                     logger.info("Fetch pipeline completed successfully")
 
                     # 2. Download attachments (runs AFTER fetch)
-                    if self.config.get('ATTACHMENTS_ENABLED', True):
-                        logger.info("Starting attachment downloads")
-                        self.run_attachments()
+                    logger.info("Starting attachment downloads")
+                    self.run_attachments()
 
                     # 3. Prediction module (BACKLOG - skip for now)
                     # When implemented:
@@ -67,7 +65,7 @@ class DaemonScheduler:
                     # self.current_interval = self.max_interval / coefficient
 
                     # For now: use fixed interval
-                    self.current_interval = self.config['SCHEDULER_DEFAULT_INTERVAL']
+                    self.current_interval = self.config["SCHEDULER_DEFAULT_INTERVAL"]
 
                     # 4. Generate output (runs AFTER prediction)
                     logger.info("Generating output feed")
@@ -78,19 +76,17 @@ class DaemonScheduler:
                     logger.warning("Fetch failed (server unreachable)")
 
                     # Still run attachments (don't skip them)
-                    if self.config.get('ATTACHMENTS_ENABLED', True):
-                        logger.info("Starting attachment downloads (despite fetch failure)")
-                        self.run_attachments()
+                    logger.info("Starting attachment downloads (despite fetch failure)")
+                    self.run_attachments()
 
                     # Prediction feedback loop: server error → increase interval (backoff)
                     # When prediction is implemented, this signals to adjust coefficient
                     # For now: use exponential backoff
                     self.current_interval = min(
-                        self.current_interval * 1.5,
-                        self.max_interval
+                        self.current_interval * 1.5, self.max_interval
                     )
                     logger.warning(
-                        f"Using backoff interval: {self.current_interval/60:.1f} min"
+                        "Using backoff interval: %.1f min", self.current_interval / 60
                     )
 
                 # 5. Memory check before sleep
@@ -100,14 +96,15 @@ class DaemonScheduler:
 
                 # 6. Sleep until next run
                 logger.info(
-                    f"Next check in {self.current_interval/60:.1f} minutes "
-                    f"({self.current_interval}s)"
+                    "Next check in %.1f minutes (%ss)",
+                    self.current_interval / 60,
+                    self.current_interval,
                 )
                 time.sleep(self.current_interval)
 
-            except Exception as e:
-                logger.error(f"Daemon error: {e}", exc_info=True)
-                time.sleep(60)  # Wait 1 minute on unexpected error
+            except (OSError, RuntimeError) as e:
+                logger.error("Daemon error in main loop: %s", e, exc_info=True)
+                # time.sleep(60)  # Wait 1 minute on error
 
         logger.info("Daemon shutdown complete")
 
@@ -121,13 +118,14 @@ class DaemonScheduler:
         try:
             load_decisions_from_web_to_database()
             return True
-        except Exception as e:
-            logger.error(f"Fetch pipeline error: {e}", exc_info=True)
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error("Fetch pipeline error: %s", e, exc_info=True)
             return False
 
     def run_attachments(self):
-        """Run attachment downloads"""
-        self.attachment_mgr.download_and_upload()
+        """Run attachment downloads and uploads"""
+        downloaded_files = self.attachment_mgr.download()
+        self.attachment_mgr.upload(downloaded_files)
 
     def run_output_generation(self):
         """Run output generation"""
@@ -140,44 +138,17 @@ class DaemonScheduler:
         Returns:
             bool: True if should exit (memory exceeded), False otherwise
         """
-        try:
-            process = psutil.Process(os.getpid())
-            memory_mb = process.memory_info().rss / 1024 / 1024  # Convert to MB
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / 1024 / 1024  # Convert to MB
 
-            logger.debug(f"Current memory usage: {memory_mb:.2f} MB")
+        logger.debug("Current memory usage: %.2f MB", memory_mb)
 
-            if memory_mb > self.max_memory_mb:
-                logger.warning(
-                    f"Memory threshold exceeded: {memory_mb:.2f} MB > "
-                    f"{self.max_memory_mb} MB"
-                )
-                return True
+        if memory_mb > self.max_memory_mb:
+            logger.warning(
+                "Memory threshold exceeded: %.2f MB > %s MB",
+                memory_mb,
+                self.max_memory_mb,
+            )
+            return True
 
-            return False
-
-        except Exception as e:
-            logger.error(f"Memory check failed: {e}", exc_info=True)
-            return False
-
-    def setup_signal_handlers(self):
-        """Setup handlers for graceful shutdown and reload"""
-
-        def handle_sigterm(signum, frame):
-            logger.info(f"Received signal {signum}, shutting down gracefully")
-            self.running = False
-
-        def handle_sighup(signum, frame):
-            logger.info("Received SIGHUP, reloading configuration")
-            # Reload .env and reinitialize components
-            from dotenv import load_dotenv
-            load_dotenv(override=True)
-
-            # Re-read config values that can be hot-reloaded
-            self.max_memory_mb = int(os.getenv('SCHEDULER_MAX_MEMORY_MB', '500'))
-            logger.info(f"Configuration reloaded: max_memory={self.max_memory_mb}MB")
-
-        signal.signal(signal.SIGTERM, handle_sigterm)
-        signal.signal(signal.SIGINT, handle_sigterm)
-        signal.signal(signal.SIGHUP, handle_sighup)
-
-        logger.debug("Signal handlers registered (SIGTERM, SIGINT, SIGHUP)")
+        return False
