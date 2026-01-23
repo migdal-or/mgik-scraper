@@ -48,40 +48,45 @@ class DaemonScheduler:
 
         while self.running:
             try:
-                # 1. Fetch news (existing function)
+                # 1. Fetch news
                 logger.info("Starting fetch pipeline")
                 fetch_result = self.fetch_news()
 
-                if fetch_result:  # Fetch succeeded
-                    logger.info("Fetch pipeline completed successfully")
-
-                    # 2. Download attachments (runs AFTER fetch)
-                    logger.info("Starting attachment downloads")
-                    self.run_attachments()
-
-                    # 3. Prediction module (BACKLOG - skip for now)
-                    # When implemented:
-                    # coefficient = self.prediction_engine.compute_urgency()
-                    # self.current_interval = self.max_interval / coefficient
-
-                    # For now: use fixed interval
-                    self.current_interval = self.config["SCHEDULER_DEFAULT_INTERVAL"]
-
-                    # 4. Generate output (runs AFTER prediction)
-                    logger.info("Generating output feed")
-                    self.run_output_generation()
-
+                if fetch_result is not None:  # Fetch succeeded (could be 0 new records)
+                    logger.info(
+                        "Fetch pipeline completed: %s new records", fetch_result
+                    )
                 else:
                     # Network error (server unreachable) - use backoff
                     logger.warning("Fetch failed (server unreachable)")
 
-                    # Still run attachments (don't skip them)
-                    logger.info("Starting attachment downloads (despite fetch failure)")
-                    self.run_attachments()
+                # 2. Download attachments (runs AFTER fetch no matter if succeeded or not)
+                logger.info("Starting attachment downloads")
+                downloaded_count = self.run_attachments()
 
-                    # Prediction feedback loop: server error → increase interval (backoff)
-                    # When prediction is implemented, this signals to adjust coefficient
-                    # For now: use exponential backoff
+                # 3. Generate RSS feed if we have new content
+                # RSS generated when either new records OR new attachments
+                # Skipped only when both counts are 0
+                if (
+                    fetch_result is not None and fetch_result > 0
+                ) or downloaded_count > 0:
+                    logger.info(
+                        "Generating output feed (%s new records, %s new attachments)",
+                        fetch_result,
+                        downloaded_count,
+                    )
+                    self.run_output_generation()
+                else:
+                    logger.info("No new content, skipping RSS generation")
+
+                # 4. Update check interval based on fetch result
+                # Reset to default interval on every cycle
+                self.current_interval = self.config["SCHEDULER_DEFAULT_INTERVAL"]
+
+                # Apply exponential backoff only when fetch fails AND no attachments downloaded
+                # This indicates complete failure (network issues, server down, etc.)
+                # Partial success (attachments downloaded) keeps normal interval
+                if fetch_result is None and downloaded_count == 0:
                     self.current_interval = min(
                         self.current_interval * 1.5, self.max_interval
                     )
@@ -108,24 +113,31 @@ class DaemonScheduler:
 
         logger.info("Daemon shutdown complete")
 
-    def fetch_news(self) -> bool:
+    def fetch_news(self) -> int | None:
         """
         Wrapper around existing load_decisions_from_web_to_database
 
         Returns:
-            bool: True on success, False on error
+            int: Number of new records inserted (0 if no new data)
+            None: Error occurred during fetch
         """
         try:
-            load_decisions_from_web_to_database()
-            return True
+            new_records = load_decisions_from_web_to_database()
+            return new_records
         except (OSError, ValueError, RuntimeError) as e:
             logger.error("Fetch pipeline error: %s", e, exc_info=True)
-            return False
+            return None
 
-    def run_attachments(self):
-        """Run attachment downloads and uploads"""
+    def run_attachments(self) -> int:
+        """
+        Run attachment downloads and uploads
+
+        Returns:
+            int: Number of files successfully downloaded
+        """
         downloaded_files = self.attachment_mgr.download()
         self.attachment_mgr.upload(downloaded_files)
+        return len(downloaded_files)
 
     def run_output_generation(self):
         """Run output generation"""

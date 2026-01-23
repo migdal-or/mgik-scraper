@@ -163,17 +163,19 @@ def load_decisions_from_web_to_database():
     Fetches data using fetch_mgik_news function.
 
     Returns:
-        dict: Parsed JSON response containing news data.
+        int: Total number of new (non-duplicate) records inserted across all pages.
     """
 
     current_url = mgik_news_url
+    total_new_records = 0  # Track total new records across all pages
 
     while current_url:
         # Fetch data from the current URL
         result = fetch_mgik_news(current_url)
         if result["status"] != "success":
             logger.error("Fetch failed: %s", result["error"])
-            raise RuntimeError(f"Failed to fetch from MGIK API: {result['error']}")
+            # raise RuntimeError(f"Failed to fetch from MGIK API: {result['error']}")
+            return None
 
         data = result["data"]
         logger.info("Fetched data from MGIK API")
@@ -196,8 +198,9 @@ def load_decisions_from_web_to_database():
             break
 
         new_count = save_to_database(items)
+        total_new_records += new_count  # Accumulate across pages
         logger.info(
-            "Inserted %s new records, %s duplicates skipped",
+            "Page complete: %s new, %s duplicate",
             new_count,
             len(items) - new_count,
         )
@@ -214,6 +217,9 @@ def load_decisions_from_web_to_database():
             break
 
         logger.debug("Fetching next page: %s", current_url)
+
+    logger.info("Fetch complete: %s total new records", total_new_records)
+    return total_new_records
 
 
 def process_attachments():

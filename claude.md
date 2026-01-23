@@ -79,9 +79,10 @@ Download PDF attachment using existing proxy/timeout/header configuration.
   - Streaming download with 8KB chunks
   - Specific exception handling (Timeout, ConnectionError, HTTPError, OSError, IOError)
 
-#### `load_decisions_from_web_to_database() -> None`
+#### `load_decisions_from_web_to_database() -> int`
 Paginated API scraping with smart stopping conditions.
 
+- **Returns**: Total number of new (non-duplicate) records inserted across all pages
 - **Pagination**: Follows `meta.next` links from API responses
 - **Stops when**:
   1. No `meta.next` link found
@@ -89,7 +90,7 @@ Paginated API scraping with smart stopping conditions.
   3. `oldest_date_in_items < MGIK_EARLIEST_DATE`
   4. No new records inserted (all duplicates)
 - **Error handling**: Raises RuntimeError on fetch failure (enables proper backoff)
-- **Logging**: Uses logging module throughout
+- **Logging**: Uses logging module throughout, logs total new records at completion
 - **Date filtering**: Extracts oldest date from each page to avoid fetching ancient data
 
 #### `process_attachments() -> list`
@@ -148,11 +149,15 @@ attachments/*.pdf (local filesystem)
 ```
 
 **Current daemon workflow:**
-1. Fetch news from API → database
-2. Download missing attachments (failure threshold)
-3. Generate RSS feed from database
-4. Memory check (exit if threshold exceeded)
-5. Sleep with adaptive interval (backoff on failures)
+1. **Fetch news** from API → database (returns new record count or None on error)
+2. **Download attachments** - runs regardless of fetch result (returns download count)
+3. **Generate RSS feed** - only when new records > 0 OR new attachments > 0
+   - Skipped when both counts are 0 (optimization to avoid unnecessary I/O)
+   - Generated even when fetch fails but attachments succeed
+4. **Update interval** - reset to default, then apply exponential backoff if fetch failed AND 0 attachments
+   - Partial success (attachments downloaded) keeps normal interval
+5. **Memory check** - exit if threshold exceeded (suicide pattern)
+6. **Sleep** - wait until next cycle with adaptive interval
 
 **Future flow additions (backlog):**
 - Publication pattern analysis → predictive scheduler (#todo)
@@ -229,12 +234,17 @@ mgik-scraper/
 
 - **Background daemon mode**
   - Continuous operation with sleep intervals
-  - Adaptive intervals with exponential backoff on failures
+  - Adaptive intervals with exponential backoff on complete failures
+  - Backoff only applies when fetch fails AND no attachments downloaded
+  - Partial success (attachments downloaded) keeps normal interval
   - Memory monitoring with suicide threshold (psutil)
   - No signal handling (removed SIGTERM, SIGINT)
 
 - **RSS feed generation**
   - Generates RSS 2.0 XML from database
+  - Generated when new records > 0 OR new attachments > 0
+  - Skipped only when both counts are 0 (optimization)
+  - Generated even when fetch fails but attachments succeed
   - Atomic file writes (temp + rename)
   - XML escaping for special characters
   - Configurable max items
@@ -242,7 +252,8 @@ mgik-scraper/
 - **Attachment downloads with failure threshold**
   - Identifies missing files (database vs local)
   - Downloads with consecutive failure threshold
-  - Runs even if fetch failed
+  - Runs regardless of fetch result (even on fetch failure)
+  - Returns count of successfully downloaded files
   - Reuses fetch_attachment() from mgik_website_worker
 
 - **Logging framework**
