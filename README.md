@@ -81,6 +81,9 @@ LOG_MAX_BYTES=10485760  # 10 MB
 LOG_BACKUP_COUNT=5
 ```
 
+### Manual database intervention
+`sqlite3 mgik_news.db "DELETE FROM decisions WHERE mgik_id IN ('1', '2');"`
+
 ### Running
 
 ```bash

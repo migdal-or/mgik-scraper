@@ -125,24 +125,25 @@ class DecisionsDatabase:
         Fetch all decision versions ordered by newest first.
 
         Returns:
-            List of dicts with mgik_id, name, number, date, file, fetched_at
+            List of dicts with internal_id, mgik_id, name, number, date, file, fetched_at
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 """
-                SELECT mgik_id, name, number, date, file, fetched_at
+                SELECT internal_id, mgik_id, name, number, date, file, fetched_at
                 FROM decisions
                 ORDER BY fetched_at DESC
                 """
             )
             return [
                 {
-                    "mgik_id": row[0],
-                    "name": row[1],
-                    "number": row[2],
-                    "date": row[3],
-                    "file": row[4],
-                    "fetched_at": row[5],
+                    "internal_id": row[0],
+                    "mgik_id": row[1],
+                    "name": row[2],
+                    "number": row[3],
+                    "date": row[4],
+                    "file": row[5],
+                    "fetched_at": row[6],
                 }
                 for row in cursor.fetchall()
             ]

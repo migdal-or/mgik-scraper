@@ -3,12 +3,22 @@ Tests for output module (RSS generator)
 """
 
 import os
+import json
+from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
 from datetime import datetime
 import xml.etree.ElementTree as ET
 import pytest
 from output import RSSGenerator
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def load_fixture(filename: str):
+    """Load JSON fixture file"""
+    with open(FIXTURES_DIR / filename, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 class TestRSSGenerator:
@@ -84,13 +94,7 @@ class TestRSSGenerator:
 
     def test_build_item(self, rss_generator):
         """Test building single RSS item"""
-        decision = {
-            "mgik_id": "123",
-            "name": "Test Decision",
-            "number": "1/2025",
-            "date": "2025-01-15",
-            "file": "https://example.com/test.pdf",
-        }
+        decision = load_fixture("decision_basic.json")
 
         item_xml = rss_generator.build_item(decision)
 
@@ -104,13 +108,7 @@ class TestRSSGenerator:
 
     def test_build_item_with_special_characters(self, rss_generator):
         """Test building item with special characters in name"""
-        decision = {
-            "mgik_id": "123",
-            "name": "Test & <Decision>",
-            "number": "1/2025",
-            "date": "2025-01-15",
-            "file": "https://example.com/test.pdf",
-        }
+        decision = load_fixture("decision_special_chars.json")
 
         item_xml = rss_generator.build_item(decision)
 
@@ -121,13 +119,7 @@ class TestRSSGenerator:
 
     def test_build_item_without_file(self, rss_generator):
         """Test building item when file field is missing"""
-        decision = {
-            "mgik_id": "123",
-            "name": "Test Decision",
-            "number": "1/2025",
-            "date": "2025-01-15",
-            "file": None,
-        }
+        decision = load_fixture("decision_no_file.json")
 
         item_xml = rss_generator.build_item(decision)
 
@@ -137,28 +129,13 @@ class TestRSSGenerator:
 
     def test_build_rss_xml(self, rss_generator):
         """Test building complete RSS XML"""
-        decisions = [
-            {
-                "mgik_id": "1",
-                "name": "Decision 1",
-                "number": "1/2025",
-                "date": "2025-01-15",
-                "file": "https://example.com/file1.pdf",
-            },
-            {
-                "mgik_id": "2",
-                "name": "Decision 2",
-                "number": "2/2025",
-                "date": "2025-01-16",
-                "file": "https://example.com/file2.pdf",
-            },
-        ]
+        decisions = load_fixture("decisions_multiple.json")
 
         xml = rss_generator.build_rss_xml(decisions)
 
         # Check XML structure
         assert '<?xml version="1.0" encoding="UTF-8"?>' in xml
-        assert '<rss version="2.0">' in xml
+        assert '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">' in xml
         assert "<channel>" in xml
         assert "</channel>" in xml
         assert "</rss>" in xml
@@ -179,21 +156,13 @@ class TestRSSGenerator:
 
         # Should still be valid RSS structure
         assert '<?xml version="1.0" encoding="UTF-8"?>' in xml
-        assert '<rss version="2.0">' in xml
+        assert '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">' in xml
         assert "<channel>" in xml
         assert "</channel>" in xml
 
     def test_build_rss_xml_is_valid_xml(self, rss_generator):
         """Test that generated RSS is valid XML"""
-        decisions = [
-            {
-                "mgik_id": "1",
-                "name": "Test Decision",
-                "number": "1/2025",
-                "date": "2025-01-15",
-                "file": "https://example.com/test.pdf",
-            }
-        ]
+        decisions = [load_fixture("decision_basic.json")]
 
         xml = rss_generator.build_rss_xml(decisions)
 
@@ -206,15 +175,7 @@ class TestRSSGenerator:
 
     def test_generate_creates_file(self, rss_generator, mock_config):
         """Test that generate() creates RSS file"""
-        rss_generator.db.get_all.return_value = [
-            {
-                "mgik_id": "1",
-                "name": "Test Decision",
-                "number": "1/2025",
-                "date": "2025-01-15",
-                "file": "https://example.com/test.pdf",
-            }
-        ]
+        rss_generator.db.get_all.return_value = [load_fixture("decision_basic.json")]
 
         rss_generator.generate()
 
@@ -230,17 +191,7 @@ class TestRSSGenerator:
 
     def test_generate_limits_items(self, rss_generator, mock_config):
         """Test that generate() respects max_items limit"""
-        # Create 20 decisions
-        decisions = [
-            {
-                "mgik_id": str(i),
-                "name": f"Decision {i}",
-                "number": f"{i}/2025",
-                "date": "2025-01-15",
-                "file": f"https://example.com/file{i}.pdf",
-            }
-            for i in range(20)
-        ]
+        decisions = load_fixture("decisions_many.json")
 
         rss_generator.db.get_all.return_value = decisions
         rss_generator.max_items = 5
@@ -255,29 +206,7 @@ class TestRSSGenerator:
 
     def test_generate_sorts_by_date_descending(self, rss_generator, mock_config):
         """Test that items are sorted by date, newest first"""
-        decisions = [
-            {
-                "mgik_id": "1",
-                "name": "Old Decision",
-                "number": "1/2025",
-                "date": "2025-01-10",
-                "file": "https://example.com/old.pdf",
-            },
-            {
-                "mgik_id": "2",
-                "name": "New Decision",
-                "number": "2/2025",
-                "date": "2025-01-20",
-                "file": "https://example.com/new.pdf",
-            },
-            {
-                "mgik_id": "3",
-                "name": "Middle Decision",
-                "number": "3/2025",
-                "date": "2025-01-15",
-                "file": "https://example.com/middle.pdf",
-            },
-        ]
+        decisions = load_fixture("decisions_sorting.json")
 
         rss_generator.db.get_all.return_value = decisions
         rss_generator.generate()
@@ -295,15 +224,7 @@ class TestRSSGenerator:
 
     def test_generate_atomic_write(self, rss_generator, mock_config):
         """Test that generate() uses atomic write (temp file + rename)"""
-        rss_generator.db.get_all.return_value = [
-            {
-                "mgik_id": "1",
-                "name": "Test",
-                "number": "1/2025",
-                "date": "2025-01-15",
-                "file": "https://example.com/test.pdf",
-            }
-        ]
+        rss_generator.db.get_all.return_value = [load_fixture("decision_basic.json")]
 
         # Temp file should not exist before
         temp_path = f"{mock_config['OUTPUT_PATH']}.tmp"

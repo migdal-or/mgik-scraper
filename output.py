@@ -50,6 +50,11 @@ class RSSGenerator:
         rss_xml = self.build_rss_xml(recent)
 
         # Write atomically (write to temp file, then rename)
+        # This prevents RSS readers from seeing partial/corrupted files:
+        # - Write complete content to temporary file first
+        # - os.replace() atomically swaps the files (all-or-nothing operation)
+        # - Readers see either old complete file or new complete file, never partial
+        # - If write fails, original file remains unchanged
         temp_path = f"{self.output_path}.tmp"
         with open(temp_path, "w", encoding="utf-8") as f:
             f.write(rss_xml)
@@ -74,15 +79,21 @@ class RSSGenerator:
             item_xml = self.build_item(decision)
             items.append(item_xml)
 
+        escaped_title = self.escape_xml(self.feed_title)
+        escaped_url = self.escape_xml(self.base_url)
+        escaped_description = self.escape_xml(self.feed_description)
+        build_date = self.format_rfc822(datetime.now())
+        items_xml = ''.join(items)
+
         channel_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>{self.escape_xml(self.feed_title)}</title>
-    <link>{self.escape_xml(self.base_url)}</link>
-    <description>{self.escape_xml(self.feed_description)}</description>
+    <title>{escaped_title}</title>
+    <link>{escaped_url}</link>
+    <description>{escaped_description}</description>
     <language>ru</language>
-    <lastBuildDate>{self.format_rfc822(datetime.now())}</lastBuildDate>
-{''.join(items)}
+    <lastBuildDate>{build_date}</lastBuildDate>
+{items_xml}
   </channel>
 </rss>"""
         return channel_xml
@@ -98,27 +109,31 @@ class RSSGenerator:
             str: RSS item XML
         """
         title = self.escape_xml(decision["name"])
-        guid = decision["mgik_id"]
+        guid = decision["internal_id"]  # Use internal_id for unique GUID
         pub_date = self.format_rfc822_from_date(decision["date"])
 
         # Build description with decision metadata
+        escaped_number = self.escape_xml(decision['number'])
+        escaped_date = self.escape_xml(decision['date'])
         desc_html = f"""<p><strong>Number:</strong>
-{self.escape_xml(decision['number'])}</p>
-<p><strong>Date:</strong> {self.escape_xml(decision['date'])}</p>"""
+{escaped_number}</p>
+<p><strong>Date:</strong> {escaped_date}</p>"""
 
         # Add file link if available
         if decision_file := decision.get("file"):
+            escaped_file = self.escape_xml(decision_file)
             desc_html += f"""
 <p><strong>Original:</strong>
-<a href="{self.escape_xml(decision_file)}">{self.escape_xml(decision_file)}</a>
+<a href="{escaped_file}">{escaped_file}</a>
 </p>"""
 
         # TODO: Add mirror URL when SSH upload is implemented (#todo)
 
+        link_url = self.escape_xml(decision.get("file") or "")
         return f"""
     <item>
       <title>{title}</title>
-      <link>{self.escape_xml(decision.get("file") or "")}</link>
+      <link>{link_url}</link>
       <guid isPermaLink="false">{guid}</guid>
       <pubDate>{pub_date}</pubDate>
       <description><![CDATA[

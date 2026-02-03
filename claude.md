@@ -49,8 +49,13 @@ Generates RSS 2.0 XML feed from decisions database.
 - Reads all decisions from database
 - Sorts by date descending
 - Takes most recent N items
-- Atomic file writes (temp file + rename)
+- Atomic file writes (temp file + os.replace())
+  - Prevents RSS readers from seeing partial/corrupted XML files
+  - Write completes to temp file first, then atomically replaces the target
+  - Ensures readers always see complete, valid RSS feed (old or new)
+  - If write crashes, original file remains unchanged
 - XML escaping for special characters
+- Code style: Complex expressions extracted from f-string curly brackets to variables for readability
 
 ### [mgik_scraper.py](mgik_scraper.py) - CLI Entry Point (legacy)
 Original one-shot scraper (still functional for manual runs).

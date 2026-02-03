@@ -11,4 +11,5 @@ attachments/
 .env
 *.json
 *.db
+*.xml
 mgik-scraper.log*
