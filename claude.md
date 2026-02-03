@@ -16,7 +16,41 @@ Main entry point for background execution.
 **Functions:**
 - `load_config()` - Loads configuration from .env (no defaults, fail-fast)
 - `setup_logging()` - Configures logging with file rotation
-- `main()` - Creates DaemonScheduler and runs main loop
+- `main()` - Validates config, sets up logging, creates DaemonScheduler and runs main loop
+
+**Startup Sequence:**
+1. Load configuration from .env
+2. **Validate configuration** (comprehensive validation before any operations)
+3. Setup logging (validated paths are safe to use)
+4. Initialize and run scheduler
+
+### [config_validator.py](config_validator.py) - Configuration Validator
+Validates all configuration values on daemon startup to fail fast with clear error messages.
+
+**ConfigValidator Class:**
+- Validates required string fields (non-empty)
+- Validates positive integers
+- Validates logical constraints (e.g., max_interval >= default_interval)
+- Validates reasonable ranges (memory limits, RSS item counts)
+- Validates file and directory paths for writability
+- Validates URLs have http(s):// protocol
+- Validates log levels against allowed values
+- Auto-creates attachments directory if needed
+- Reports all validation errors at once (not just first error)
+
+**Validation Categories:**
+- **Required strings**: MGIK_NEWS_URL, MGIK_DB_PATH, OUTPUT_PATH, RSS feed config, etc.
+- **Positive integers**: All interval, memory, count, and size settings
+- **Reasonable limits**: Memory 100MB-10GB, RSS items 1-1000
+- **Path validation**: Checks parent dirs exist, paths are writable, creates attachments dir
+- **URL validation**: Ensures http:// or https:// protocol
+- **Log level validation**: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+**Behavior:**
+- Runs before logging setup to catch path errors early
+- Fails immediately on any validation error with clear message
+- Prints all errors to stderr
+- Exits with code 1 on validation failure
 
 ### [scheduler.py](scheduler.py) - Core Scheduler
 Main daemon loop that orchestrates all components in strict sequential order.
@@ -34,21 +68,37 @@ Main daemon loop that orchestrates all components in strict sequential order.
 - No signal handling (SIGTERM, SIGINT removed)
 
 ### [attachments.py](attachments.py) - Attachment Manager
-Manages PDF attachment downloads with failure threshold.
+Manages PDF attachment downloads with failure threshold and protection.
 
 **Features:**
 - Compares database URLs with local files to find missing attachments
 - Downloads with consecutive failure threshold (stops after N failures)
+- File size limit (ATTACHMENTS_MAX_SIZE_MB) passed to fetch_attachment()
+- Custom timeout (ATTACHMENTS_TIMEOUT) for individual downloads
 - Reuses fetch_attachment() from mgik_website_worker
 - No SSH upload (moved to backlog)
 
-### [output.py](output.py) - RSS Generator
-Generates RSS 2.0 XML feed from decisions database.
+### [output.py](output.py) - Output Manager & RSS Generator
+Manages multiple output formats (RSS, HTML, Telegram, etc.) with extensible architecture.
 
-**Features:**
+**OutputManager Class:**
+- Orchestrates all enabled output generators
+- Initializes generators based on configuration
+- Executes generators sequentially
+- Fail-fast behavior: stops daemon on any generator failure
+- Easy to extend with new output formats (HTML, Telegram bot, etc.)
+
+**RSSGenerator Class:**
+- Generates RSS 2.0 XML from decisions database
 - Reads all decisions from database
 - Sorts by date descending
 - Takes most recent N items
+- **RSS validation with feedparser**
+  - Semantic validation, not just XML syntax checking
+  - Checks 'bozo' flag for malformed feeds
+  - Fail-fast: raises ValueError if validation fails
+  - Catches bugs before writing corrupted feeds
+  - Old valid RSS remains available on failure (atomic write protection)
 - Atomic file writes (temp file + os.replace())
   - Prevents RSS readers from seeing partial/corrupted XML files
   - Write completes to temp file first, then atomically replaces the target
@@ -75,14 +125,20 @@ HTTP client with proxy and timeout support.
   - Custom headers from environment
 - **Logging**: Uses logging module with lazy formatting
 
-#### `fetch_attachment(url: str, save_path: str) -> dict`
-Download PDF attachment using existing proxy/timeout/header configuration.
+#### `fetch_attachment(url: str, save_path: str, max_size_mb: int = None, timeout: int = None) -> dict`
+Download PDF attachment with size limits and custom timeout.
 
 - **Returns**: `{"status": "success"/"error", "error": error_msg}`
+- **Parameters**:
+  - `max_size_mb`: Maximum file size in MB (None = no limit)
+  - `timeout`: Request timeout in seconds (None = use default request_timeout)
 - **Features**:
-  - Reuses global PROXIES, mgik_headers, request_timeout
+  - **Pre-download size check**: Uses Content-Length header with stream=True
+  - **Custom timeout**: Overrides global request_timeout per-file
+  - Reuses global PROXIES, mgik_headers
   - Streaming download with 8KB chunks
   - Specific exception handling (Timeout, ConnectionError, HTTPError, OSError, IOError)
+  - Returns descriptive error messages (e.g., "File too large: 75.2MB > 50MB")
 
 #### `load_decisions_from_web_to_database() -> int`
 Paginated API scraping with smart stopping conditions.
@@ -104,12 +160,24 @@ Legacy PDF download function (replaced by AttachmentManager).
 - **Status**: Still exists but superseded by attachments.py
 - Returns list of failed downloads
 
-### [datastore.py](datastore.py) - Database Layer (149 lines)
+### [datastore.py](datastore.py) - Database Layer
 
 #### `DecisionsDatabase` Class
-SQLite wrapper with automatic versioning.
+SQLite wrapper with automatic versioning and query optimization.
+
+**Database Schema:**
+- Table: `decisions` with UNIQUE constraint on (mgik_id, name, number, date, file)
+- **Indexes for performance:**
+  - `idx_fetched_at` on fetched_at DESC - speeds up get_all() sorting
+  - `idx_date` on date DESC - speeds up date-based queries
+  - `idx_file` on file - speeds up get_all_files() DISTINCT queries
+- All indexes created with IF NOT EXISTS
 
 **Key Methods:**
+
+- `init_db()`
+  - Creates table and indexes if they don't exist
+  - Idempotent - safe to call multiple times
 
 - `save_decisions(decisions: list) -> int`
   - Inserts records, returns count of new (non-duplicate) records
@@ -118,10 +186,12 @@ SQLite wrapper with automatic versioning.
 
 - `get_all_files() -> list[str]`
   - Returns all unique file URLs from database
+  - Uses idx_file index for faster DISTINCT queries
   - Used by attachment processor to know what to download
 
 - `get_all() -> list[dict]`
-  - Returns all decisions with all fields
+  - Returns all decisions ordered by fetched_at DESC
+  - Uses idx_fetched_at index for faster sorting
   - Useful for RSS feed generation
 
 - `build_pdf_url(relative_path: str) -> str`
@@ -217,19 +287,26 @@ The Moscow City Election Commission publishes news as JSON via a React-based web
 
 ```
 mgik-scraper/
-├── daemon.py                # Daemon entry point
+├── daemon.py                # Daemon entry point with config validation
+├── config_validator.py      # Configuration validator
 ├── scheduler.py             # Core scheduler with memory monitoring
 ├── attachments.py           # Attachment manager
-├── output.py                # RSS generator
+├── output.py                # Output manager & RSS generator
 ├── mgik_scraper.py          # Legacy CLI entry point
 ├── mgik_website_worker.py   # Scraping logic with fetch_attachment
 ├── datastore.py             # Database layer
-├── requirements.txt         # 5 dependencies (requests, dotenv, pytest, pytest-mock, psutil)
+├── requirements.txt         # Dependencies (requests, dotenv, pytest, pytest-mock, psutil, feedparser)
 ├── .env                     # Configuration (gitignored)
 ├── .env.example             # Configuration template
 ├── mgik_news.db             # SQLite database
 ├── attachments/             # Downloaded PDFs
 ├── tests/                   # Test suite directory
+│   ├── test_config_validator.py  # 32 config validation tests
+│   ├── test_output.py            # 17 RSS generator tests
+│   ├── test_scheduler.py         # 18 scheduler tests
+│   ├── test_attachments.py       # 14 attachment manager tests
+│   ├── test_mgik_website_worker.py # 27 scraper tests
+│   └── ...                       # Other test files
 ├── .venv/                   # Python virtual environment
 └── README.md                # User-facing documentation
 ```
@@ -265,18 +342,25 @@ pytest tests/test_scheduler.py -v
   - Memory monitoring with suicide threshold (psutil)
   - No signal handling (removed SIGTERM, SIGINT)
 
-- **RSS feed generation**
-  - Generates RSS 2.0 XML from database
+- **Output generation with multiple format support**
+  - Extensible architecture via OutputManager class
+  - RSS 2.0 XML generation from database
+  - **RSS validation with feedparser (semantic validation)**
   - Generated when new records > 0 OR new attachments > 0
   - Skipped only when both counts are 0 (optimization)
   - Generated even when fetch fails but attachments succeed
   - Atomic file writes (temp + rename)
   - XML escaping for special characters
   - Configurable max items
+  - Fail-fast behavior: daemon stops on validation/output errors
+  - Easy to extend with HTML, Telegram, or other output formats
 
-- **Attachment downloads with failure threshold**
+- **Attachment downloads with failure threshold and protection**
   - Identifies missing files (database vs local)
   - Downloads with consecutive failure threshold
+  - **File size limit (50MB max)** - checks Content-Length header before download
+  - **Custom timeout (600s/10min)** - per-file timeout override
+  - Efficient size checking with stream=True (headers only)
   - Runs regardless of fetch result (even on fetch failure)
   - Returns count of successfully downloaded files
   - Reuses fetch_attachment() from mgik_website_worker
@@ -307,42 +391,46 @@ pytest tests/test_scheduler.py -v
   - Direct dictionary access (no .get() with defaults)
   - Fails immediately if required values missing
 
-### ⏳ Backlog Features
+- **Configuration validation on startup** ✅
+  - Comprehensive validation before any operations
+  - Validates types, ranges, paths, URLs, log levels
+  - Checks numeric values are in valid ranges
+  - Verifies paths are writable
+  - Auto-creates attachments directory
+  - Reports all errors at once with clear messages
+  - 32 validation tests covering all scenarios (including attachment limits)
 
-- **Config validation** (#todo)
-  - Validate configuration on startup
-  - Check numeric values are in valid ranges (positive intervals, reasonable memory limits)
-  - Verify paths are writable
-  - Fail fast with clear error messages
+### ⏳ Backlog Features
 
 - **Error recovery improvements** (#todo)
   - Uncomment sleep in scheduler exception handler (line 112 in scheduler.py)
   - Add retry limits with exponential backoff for persistent errors
   - Prevent infinite error loops (e.g., disk full, permission denied)
 
-- **RSS validation** (#todo)
-  - Parse generated RSS XML with `ET.fromstring()` before writing
-  - Catch malformed XML early to prevent corrupted feed files
-  - Add test to verify RSS validates against RSS 2.0 spec
-
 - **RSS feed improvements** (#todo)
-  - Add RSS XML validation before writing to catch formatting issues
   - Consider adding more metadata (author, category, etc.)
+  - Add enclosure tags for PDF attachments (better podcast/RSS reader support)
 
-- **Attachment download improvements** (#todo)
-  - Add retry logic for failed downloads
-  - Track failed downloads in database and retry in future cycles
-  - Limit attachment file size (max 50MB) to prevent service hangs from extremely large files
-  - Add timeout for individual file downloads
+- **Attachment download protection** ✅
+  - File size limit (50MB max via ATTACHMENTS_MAX_SIZE_MB config)
+  - Pre-download size check using Content-Length header with stream=True
+  - Custom timeout (600s/10min via ATTACHMENTS_TIMEOUT config)
+  - Retry logic works via scheduler loop - failed downloads retried in next cycle
+  - Config validation enforces reasonable ranges (1-500MB, 10-3600s)
+  - 4 new tests for size/timeout validation in fetch_attachment()
 
 - **Health monitoring** (#todo)
   - Add simple HTTP health endpoint or status file
   - Report last successful fetch timestamp, record count, download stats
   - Enable external monitoring
 
-- **Database optimization** (#todo)
-  - Consider connection pooling or persistent connections
-  - Add indexes on frequently queried columns (date, fetched_at)
+- **Database optimization** ✅
+  - Added indexes on frequently queried columns (fetched_at DESC, date DESC, file)
+  - idx_fetched_at: Speeds up ORDER BY fetched_at DESC in get_all()
+  - idx_date: Speeds up date-based queries and RSS sorting
+  - idx_file: Speeds up DISTINCT file queries in get_all_files()
+  - Indexes created with IF NOT EXISTS to avoid recreation
+  - Connection pooling not needed (low frequency access, simple operations)
 
 - **Predictive scheduling** (#todo)
   - Analyze `fetched_at` timestamps to find publication patterns
@@ -374,7 +462,12 @@ pytest tests/test_scheduler.py -v
 ### Testing
 - **Comprehensive test suite implemented** ✅
   - All core modules have pytest tests
-  - 18 passing tests in test_scheduler.py
+  - 117 passing tests across all modules
+  - 32 config validator tests (including attachment size/timeout validation)
+  - 17 RSS generator tests including semantic validation tests
+  - 18 scheduler tests (updated to use OutputManager)
+  - 14 attachment manager tests
+  - 27 mgik_website_worker tests (including 4 fetch_attachment tests for size/timeout)
   - Database isolation using tmp_path and patch.object()
   - Proper mocking of external dependencies
   - Test coverage includes success paths, error handling, and edge cases
@@ -420,7 +513,9 @@ All configuration via `.env` file loaded with python-dotenv. **No defaults** - c
 #### Attachments Configuration
 
 - **ATTACHMENTS_DIR**: Directory for downloaded PDFs
-- **ATTACHMENTS_MAX_FAILURES**: Consecutive failure threshold
+- **ATTACHMENTS_MAX_FAILURES**: Consecutive failure threshold (stops after N failures)
+- **ATTACHMENTS_MAX_SIZE_MB**: Maximum file size in MB (e.g., 50, range: 1-500)
+- **ATTACHMENTS_TIMEOUT**: Download timeout in seconds (e.g., 600, range: 10-3600)
 
 #### Logging Configuration
 

@@ -185,7 +185,7 @@ class TestRSSGenerator:
         parsed = feedparser.parse(xml)
 
         # Check bozo flag (indicates malformed feed)
-        if parsed.bozo != 0:
+        if parsed.bozo:
             error_msg = (
                 parsed.bozo_exception
                 if hasattr(parsed, "bozo_exception")

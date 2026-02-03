@@ -31,15 +31,15 @@ class TestDaemonScheduler:
     @pytest.fixture
     def scheduler(self, mock_config):
         """Create DaemonScheduler with mocked components"""
-        with patch("scheduler.AttachmentManager"), patch("scheduler.RSSGenerator"):
+        with patch("scheduler.AttachmentManager"), patch("scheduler.OutputManager"):
             sched = DaemonScheduler(mock_config)
             sched.attachment_mgr = Mock()
-            sched.output_gen = Mock()
+            sched.output_mgr = Mock()
             return sched
 
     def test_init(self, mock_config):
         """Test DaemonScheduler initialization"""
-        with patch("scheduler.AttachmentManager"), patch("scheduler.RSSGenerator"):
+        with patch("scheduler.AttachmentManager"), patch("scheduler.OutputManager"):
             scheduler = DaemonScheduler(mock_config)
             assert scheduler.current_interval == 1800
             assert scheduler.max_interval == 28800
@@ -82,7 +82,7 @@ class TestDaemonScheduler:
         """Test running output generation"""
         scheduler.run_output_generation()
 
-        scheduler.output_gen.generate.assert_called_once()
+        scheduler.output_mgr.generate.assert_called_once()
 
     @patch("scheduler.psutil.Process")
     def test_check_memory_below_threshold(self, mock_process, scheduler):
@@ -126,7 +126,7 @@ class TestDaemonScheduler:
         # Verify workflow
         mock_load.assert_called_once()
         scheduler.attachment_mgr.download.assert_called_once()
-        scheduler.output_gen.generate.assert_called_once()
+        scheduler.output_mgr.generate.assert_called_once()
 
         # Verify interval was reset to default (not increased)
         assert scheduler.current_interval == mock_config["SCHEDULER_DEFAULT_INTERVAL"]
@@ -151,7 +151,7 @@ class TestDaemonScheduler:
         # Verify backoff applied (1800 * 1.5 = 2700)
         assert scheduler.current_interval == 2700
         # RSS should not be generated when no new content
-        scheduler.output_gen.generate.assert_not_called()
+        scheduler.output_mgr.generate.assert_not_called()
 
     @patch("scheduler.time.sleep")
     @patch("scheduler.load_decisions_from_web_to_database")
@@ -173,7 +173,7 @@ class TestDaemonScheduler:
         # Should use normal interval (partial success)
         assert scheduler.current_interval == mock_config["SCHEDULER_DEFAULT_INTERVAL"]
         # RSS should be generated (new attachments)
-        scheduler.output_gen.generate.assert_called_once()
+        scheduler.output_mgr.generate.assert_called_once()
 
     @patch("scheduler.time.sleep")
     @patch("scheduler.load_decisions_from_web_to_database")
@@ -190,7 +190,7 @@ class TestDaemonScheduler:
 
         scheduler.run()
 
-        scheduler.output_gen.generate.assert_called_once()
+        scheduler.output_mgr.generate.assert_called_once()
 
     @patch("scheduler.time.sleep")
     @patch("scheduler.load_decisions_from_web_to_database")
@@ -209,7 +209,7 @@ class TestDaemonScheduler:
 
         scheduler.run()
 
-        scheduler.output_gen.generate.assert_called_once()
+        scheduler.output_mgr.generate.assert_called_once()
 
     @patch("scheduler.time.sleep")
     @patch("scheduler.load_decisions_from_web_to_database")
@@ -226,7 +226,7 @@ class TestDaemonScheduler:
 
         scheduler.run()
 
-        scheduler.output_gen.generate.assert_not_called()
+        scheduler.output_mgr.generate.assert_not_called()
 
     @patch("scheduler.time.sleep")
     @patch("scheduler.load_decisions_from_web_to_database")
@@ -332,7 +332,7 @@ class TestDaemonScheduler:
 
         mock_load.side_effect = track_load
         scheduler.attachment_mgr.download.side_effect = track_download
-        scheduler.output_gen.generate.side_effect = track_generate
+        scheduler.output_mgr.generate.side_effect = track_generate
         mock_sleep.side_effect = stop_after_sleep
 
         scheduler.run()

@@ -11,7 +11,7 @@ import logging
 import psutil
 from mgik_website_worker import load_decisions_from_web_to_database
 from attachments import AttachmentManager
-from output import RSSGenerator
+from output import OutputManager
 
 logger = logging.getLogger("mgik-scraper")
 
@@ -34,7 +34,7 @@ class DaemonScheduler:
 
         # Initialize components
         self.attachment_mgr = AttachmentManager(config)
-        self.output_gen = RSSGenerator(config)
+        self.output_mgr = OutputManager(config)
 
         logger.info(
             "Scheduler initialized: interval=%ss, max_memory=%sMB",
@@ -64,20 +64,20 @@ class DaemonScheduler:
                 logger.info("Starting attachment downloads")
                 downloaded_count = self.run_attachments()
 
-                # 3. Generate RSS feed if we have new content
-                # RSS generated when either new records OR new attachments
+                # 3. Generate output (RSS, HTML, etc.) if we have new content
+                # Output generated when either new records OR new attachments
                 # Skipped only when both counts are 0
                 if (
                     fetch_result is not None and fetch_result > 0
                 ) or downloaded_count > 0:
                     logger.info(
-                        "Generating output feed (%s new records, %s new attachments)",
+                        "Generating output (%s new records, %s new attachments)",
                         fetch_result,
                         downloaded_count,
                     )
                     self.run_output_generation()
                 else:
-                    logger.info("No new content, skipping RSS generation")
+                    logger.info("No new content, skipping output generation")
 
                 # 4. Update check interval based on fetch result
                 # Reset to default interval on every cycle
@@ -140,8 +140,8 @@ class DaemonScheduler:
         return len(downloaded_files)
 
     def run_output_generation(self):
-        """Run output generation"""
-        self.output_gen.generate()
+        """Run all output generators (RSS, HTML, Telegram, etc.)"""
+        self.output_mgr.generate()
 
     def check_memory_and_suicide(self) -> bool:
         """

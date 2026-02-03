@@ -75,7 +75,9 @@ def fetch_mgik_news(mgik_url: str) -> dict:
         return {"status": "error", "error": "MGIK invalid JSON response"}
 
 
-def fetch_attachment(url: str, save_path: str) -> dict:
+def fetch_attachment(
+    url: str, save_path: str, max_size_mb: int | None = None, timeout: int | None = None
+) -> dict:
     """
     Download PDF attachment using existing proxy/timeout/header configuration.
     Extracted from existing process_attachments() function (lines 210-226).
@@ -83,20 +85,36 @@ def fetch_attachment(url: str, save_path: str) -> dict:
     Args:
         url: Full URL to the PDF file
         save_path: Local filesystem path to save the file
+        max_size_mb: Maximum file size in MB (None = no limit)
+        timeout: Request timeout in seconds (None = use default request_timeout)
 
     Returns: {"status": "success"/"error", "error": ...}
     """
     try:
+        # Use custom timeout if provided, otherwise use global default
+        fetch_timeout = timeout or request_timeout
+
         response = requests.get(
             url,
             proxies=PROXIES,
             headers=mgik_headers,
-            timeout=request_timeout,
+            timeout=fetch_timeout,
             stream=True,
             verify=False,  # Maintain existing SSL behavior
         )
 
         response.raise_for_status()  # Raise error for HTTP 4xx/5xx
+
+        # Check file size from Content-Length header
+        if max_size_mb:
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                size_mb = int(content_length) / (1024 * 1024)
+                if size_mb > max_size_mb:
+                    return {
+                        "status": "error",
+                        "error": f"File too large: {size_mb:.1f}MB > {max_size_mb}MB",
+                    }
 
         # Save file with streaming (existing 8KB chunk pattern)
         with open(save_path, "wb") as f:
@@ -106,7 +124,8 @@ def fetch_attachment(url: str, save_path: str) -> dict:
         return {"status": "success"}
 
     except requests.exceptions.Timeout:
-        return {"status": "error", "error": f"Timeout ({request_timeout}s)"}
+        timeout_value = timeout or request_timeout
+        return {"status": "error", "error": f"Timeout ({timeout_value}s)"}
     except requests.exceptions.ConnectionError as e:
         return {"status": "error", "error": f"Connection failed: {e}"}
     except requests.exceptions.HTTPError as e:

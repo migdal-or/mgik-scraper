@@ -29,11 +29,15 @@ class AttachmentManager:
         self.db = DecisionsDatabase()
         self.attachments_dir = config["ATTACHMENTS_DIR"]
         self.max_consecutive_failures = config["ATTACHMENTS_MAX_FAILURES"]
+        self.max_size_mb = config["ATTACHMENTS_MAX_SIZE_MB"]
+        self.timeout = config["ATTACHMENTS_TIMEOUT"]
 
         logger.info(
-            "AttachmentManager initialized: dir=%s, max_failures=%s",
+            "AttachmentManager initialized: dir=%s, max_failures=%s, max_size=%sMB, timeout=%ss",
             self.attachments_dir,
             self.max_consecutive_failures,
+            self.max_size_mb,
+            self.timeout,
         )
 
     def download(self):
@@ -153,8 +157,10 @@ class AttachmentManager:
         filename = os.path.basename(file_url)
         local_path = os.path.join(self.attachments_dir, filename)
 
-        # Use dedicated fetch_attachment function (reuses proxy/headers/timeout)
-        result = fetch_attachment(file_url, local_path)
+        # Use dedicated fetch_attachment function with size limit and timeout
+        result = fetch_attachment(
+            file_url, local_path, max_size_mb=self.max_size_mb, timeout=self.timeout
+        )
 
         if result["status"] == "error":
             return {"status": "error", "error": result["error"]}

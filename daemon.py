@@ -11,6 +11,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 from scheduler import DaemonScheduler
+from config_validator import validate_config, ConfigValidationError
 
 
 def setup_logging(config):
@@ -57,6 +58,8 @@ def load_config():
         "RSS_FEED_DESCRIPTION": os.getenv("RSS_FEED_DESCRIPTION"),
         "ATTACHMENTS_DIR": os.getenv("ATTACHMENTS_DIR"),
         "ATTACHMENTS_MAX_FAILURES": int(os.getenv("ATTACHMENTS_MAX_FAILURES")),
+        "ATTACHMENTS_MAX_SIZE_MB": int(os.getenv("ATTACHMENTS_MAX_SIZE_MB")),
+        "ATTACHMENTS_TIMEOUT": int(os.getenv("ATTACHMENTS_TIMEOUT")),
         # Logging config
         "LOG_LEVEL": os.getenv("LOG_LEVEL"),
         "LOG_FILE": os.getenv("LOG_FILE"),
@@ -73,9 +76,17 @@ def main():
         # Load configuration
         config = load_config()
 
+        # Validate configuration (fail fast with clear errors)
+        try:
+            validate_config(config)
+        except ConfigValidationError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+
         # Setup logging
         logger = setup_logging(config)
         logger.info("MGIK Scraper Daemon starting")
+        logger.info("Configuration validated successfully")
 
         # Create and run scheduler
         scheduler = DaemonScheduler(config)

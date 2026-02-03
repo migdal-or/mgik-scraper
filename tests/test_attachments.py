@@ -18,6 +18,8 @@ class TestAttachmentManager:
         return {
             "ATTACHMENTS_DIR": str(tmp_path / "attachments"),
             "ATTACHMENTS_MAX_FAILURES": 3,
+            "ATTACHMENTS_MAX_SIZE_MB": 50,
+            "ATTACHMENTS_TIMEOUT": 600,
             "MGIK_DB_PATH": str(tmp_path / "test.db"),
         }
 

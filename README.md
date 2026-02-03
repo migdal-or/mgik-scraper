@@ -11,9 +11,12 @@ A web scraper for the Moscow City Election Commission (MosGorIzbirKom) that moni
 - **Background daemon** with adaptive scheduling
   - Exponential backoff on complete failures
   - Normal interval on partial success (attachments downloaded)
-- **RSS 2.0 feed generation**
+- **Multi-format output generation**
+  - Extensible architecture supporting RSS, HTML, Telegram, etc.
+  - RSS 2.0 feed with semantic validation (feedparser)
   - Generated when new records OR new attachments
   - Skipped only when no new content (optimization)
+  - Fail-fast: stops on validation errors to prevent corrupted output
 - **Smart PDF attachment downloads**
   - Consecutive failure threshold
   - Runs regardless of fetch result
@@ -21,7 +24,10 @@ A web scraper for the Moscow City Election Commission (MosGorIzbirKom) that moni
 - **Change detection** and version tracking
 - **Logging** with file rotation
 - **SOCKS5 proxy** support
-- **Fail-fast configuration** (no defaults)
+- **Comprehensive configuration validation**
+  - Validates all settings on startup
+  - Checks types, ranges, paths, and URLs
+  - Fail-fast with clear error messages
 
 ## Quick Start
 

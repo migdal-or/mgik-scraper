@@ -1,17 +1,81 @@
 """
 Output Generator for MGIK Scraper
 
-Generates RSS 2.0 XML feed from database decisions.
-TODO: Decide final format (RSS vs static HTML vs Telegram bot)
+Manages multiple output formats: RSS feed, HTML pages, Telegram notifications, etc.
+Each output format is implemented as a separate generator class.
 """
 
 import os
 import logging
 from datetime import datetime
 from email.utils import formatdate
+import feedparser
 from datastore import DecisionsDatabase
 
 logger = logging.getLogger("mgik-scraper")
+
+
+class OutputManager:
+    """
+    Orchestrates multiple output formats
+
+    This is the main interface used by the scheduler. It manages
+    different output generators (RSS, HTML, Telegram, etc.) and
+    ensures they all succeed or fail together.
+    """
+
+    def __init__(self, config: dict):
+        """
+        Initialize output manager with all enabled generators
+
+        Args:
+            config: Configuration dictionary
+        """
+        self.config = config
+        self.generators = []
+
+        # Initialize RSS generator (always enabled for now)
+        if config.get("OUTPUT_PATH"):
+            self.generators.append(RSSGenerator(config))
+            logger.info("Initialized RSS generator")
+
+        # Future: Initialize other generators based on config
+        # if config.get("HTML_OUTPUT_PATH"):
+        #     self.generators.append(HTMLGenerator(config))
+        # if config.get("TELEGRAM_BOT_TOKEN"):
+        #     self.generators.append(TelegramNotifier(config))
+
+        logger.info(
+            "OutputManager initialized with %d generators", len(self.generators)
+        )
+
+    def generate(self):
+        """
+        Generate all enabled output formats
+
+        Executes each generator in sequence. If any generator fails, the exception
+        is logged and re-raised to stop execution (fail-fast behavior).
+
+        Rationale for fail-fast:
+        - Output generation failures typically indicate bugs, not transient errors
+        - Examples: RSS validation failure, filesystem permission errors, etc.
+        - Better to stop the daemon visibly than continue with partial/broken output
+        - Allows external monitoring to detect and alert on output issues
+        - Primary data collection (scraping to database) completes before this step
+
+        Raises:
+            Exception: If any generator fails, the original exception propagates
+        """
+        for generator in self.generators:
+            generator_name = generator.__class__.__name__
+            logger.info("Running %s", generator_name)
+            try:
+                generator.generate()
+                logger.info("%s completed successfully", generator_name)
+            except Exception as e:
+                logger.error("%s failed: %s", generator_name, e, exc_info=True)
+                # Re-raise to stop execution - output generation failures should be visible
+                raise
 
 
 class RSSGenerator:
@@ -49,6 +113,27 @@ class RSSGenerator:
 
         rss_xml = self.build_rss_xml(recent)
 
+        # Validate RSS before writing
+        # Uses feedparser to perform semantic RSS validation, not just XML syntax checking.
+        # The 'bozo' flag indicates a malformed feed (missing required elements,
+        # invalid structure, etc.). This catches bugs in RSS generation logic before
+        # writing corrupted feeds to disk.
+        #
+        # Rationale for fail-fast behavior:
+        # - RSS validation failures indicate a bug in our code, not transient errors
+        # - Writing invalid RSS would break feed readers and go unnoticed
+        # - Better to fail visibly (stop daemon) than silently serve broken feeds
+        # - The atomic write pattern ensures old valid RSS remains available
+        parsed = feedparser.parse(rss_xml)
+        if parsed.bozo:
+            error_msg = (
+                str(parsed.bozo_exception)
+                if hasattr(parsed, "bozo_exception")
+                else "unknown parsing error"
+            )
+            logger.error("Generated RSS is malformed: %s", error_msg)
+            raise ValueError(f"RSS validation failed: {error_msg}")
+
         # Write atomically (write to temp file, then rename)
         # This prevents RSS readers from seeing partial/corrupted files:
         # - Write complete content to temporary file first
@@ -83,7 +168,7 @@ class RSSGenerator:
         escaped_url = self.escape_xml(self.base_url)
         escaped_description = self.escape_xml(self.feed_description)
         build_date = self.format_rfc822(datetime.now())
-        items_xml = ''.join(items)
+        items_xml = "".join(items)
 
         channel_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
@@ -113,8 +198,8 @@ class RSSGenerator:
         pub_date = self.format_rfc822_from_date(decision["date"])
 
         # Build description with decision metadata
-        escaped_number = self.escape_xml(decision['number'])
-        escaped_date = self.escape_xml(decision['date'])
+        escaped_number = self.escape_xml(decision["number"])
+        escaped_date = self.escape_xml(decision["date"])
         desc_html = f"""<p><strong>Number:</strong>
 {escaped_number}</p>
 <p><strong>Date:</strong> {escaped_date}</p>"""

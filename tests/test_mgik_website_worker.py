@@ -148,6 +148,75 @@ class TestFetchAttachment:
         assert result["status"] == "error"
         assert "File error" in result["error"]
 
+    @patch("mgik_website_worker.requests.get")
+    def test_fetch_attachment_file_too_large(self, mock_get):
+        """Test that file size limit is enforced"""
+        mock_response = Mock()
+        mock_response.headers = {"Content-Length": str(100 * 1024 * 1024)}  # 100 MB
+        mock_response.raise_for_status = Mock()
+        mock_get.return_value = mock_response
+
+        result = fetch_attachment(
+            "http://test.com/huge.pdf", "/tmp/test.pdf", max_size_mb=50
+        )
+
+        assert result["status"] == "error"
+        assert "File too large" in result["error"]
+        assert "100" in result["error"]
+        assert "50" in result["error"]
+
+    @patch("mgik_website_worker.requests.get")
+    @patch("builtins.open", new_callable=mock_open)
+    def test_fetch_attachment_within_size_limit(self, mock_file, mock_get):
+        """Test that files within size limit are downloaded"""
+        mock_response = Mock()
+        mock_response.headers = {"Content-Length": str(10 * 1024 * 1024)}  # 10 MB
+        mock_response.iter_content.return_value = [b"content"]
+        mock_response.raise_for_status = Mock()
+        mock_get.return_value = mock_response
+
+        result = fetch_attachment(
+            "http://test.com/small.pdf", "/tmp/test.pdf", max_size_mb=50
+        )
+
+        assert result["status"] == "success"
+        mock_file.assert_called_once_with("/tmp/test.pdf", "wb")
+
+    @patch("mgik_website_worker.requests.get")
+    @patch("builtins.open", new_callable=mock_open)
+    def test_fetch_attachment_no_content_length(self, mock_file, mock_get):
+        """Test that downloads proceed when Content-Length header is missing"""
+        mock_response = Mock()
+        mock_response.headers = {}  # No Content-Length header
+        mock_response.iter_content.return_value = [b"content"]
+        mock_response.raise_for_status = Mock()
+        mock_get.return_value = mock_response
+
+        result = fetch_attachment(
+            "http://test.com/file.pdf", "/tmp/test.pdf", max_size_mb=50
+        )
+
+        assert result["status"] == "success"
+        mock_file.assert_called_once_with("/tmp/test.pdf", "wb")
+
+    @patch("mgik_website_worker.requests.get")
+    def test_fetch_attachment_custom_timeout(self, mock_get):
+        """Test that custom timeout is used"""
+        mock_response = Mock()
+        mock_response.iter_content.return_value = [b"content"]
+        mock_response.raise_for_status = Mock()
+        mock_response.headers = {}
+        mock_get.return_value = mock_response
+
+        with patch("builtins.open", new_callable=mock_open):
+            fetch_attachment(
+                "http://test.com/file.pdf", "/tmp/test.pdf", timeout=600
+            )
+
+        # Verify timeout parameter was passed to requests.get
+        call_kwargs = mock_get.call_args[1]
+        assert call_kwargs["timeout"] == 600
+
 
 class TestSaveToDatabase:
     """Tests for save_to_database function"""

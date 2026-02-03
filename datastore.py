@@ -67,6 +67,29 @@ class DecisionsDatabase:
                 """
             )
 
+            # Create indexes for frequently queried columns (only if they don't exist)
+            # idx_fetched_at: Speeds up ORDER BY fetched_at DESC in get_all()
+            # idx_date: Speeds up potential date-based queries and RSS sorting
+            # idx_file: Speeds up DISTINCT file queries in get_all_files()
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_fetched_at
+                ON decisions(fetched_at DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_date
+                ON decisions(date DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file
+                ON decisions(file)
+                """
+            )
+
     def save_decisions(self, decisions: List[Dict]) -> int:
         """
         Save new decision versions, skipping exact duplicates.
