@@ -5,7 +5,10 @@ pycache/
 .Python
 env/
 venv/
-election_data.db
 attachments/
 .DS_Store
 .vscode/
+.env
+*.json
+*.db
+mgik-scraper.log*
