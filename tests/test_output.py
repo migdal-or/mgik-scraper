@@ -5,11 +5,13 @@ Tests for output module (RSS generator)
 import os
 import json
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock
 from unittest.mock import patch
 from datetime import datetime
 import xml.etree.ElementTree as ET
 import pytest
+import feedparser
 from output import RSSGenerator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -172,6 +174,48 @@ class TestRSSGenerator:
             assert True
         except ET.ParseError as e:
             pytest.fail(f"Generated RSS is not valid XML: {e}")
+
+    def test_build_rss_xml_is_valid_rss_semantically(self, rss_generator):
+        """Test that generated RSS is semantically valid using feedparser"""
+        decisions = load_fixture("decisions_multiple.json")
+
+        xml = rss_generator.build_rss_xml(decisions)
+
+        # Parse with feedparser
+        parsed = feedparser.parse(xml)
+
+        # Check bozo flag (indicates malformed feed)
+        if parsed.bozo != 0:
+            error_msg = (
+                parsed.bozo_exception
+                if hasattr(parsed, "bozo_exception")
+                else "unknown error"
+            )
+            pytest.fail(f"Feed is malformed: {error_msg}")
+
+        # Check feed metadata (feedparser returns FeedParserDict with dynamic attributes)
+        feed_info = cast(dict, parsed.feed)
+        assert feed_info.get("title") == "Test Feed"
+        assert feed_info.get("link") == "https://www.example.com"
+        assert feed_info.get("description") == "Test Description"
+        assert feed_info.get("language") == "ru"
+
+        # Check entries
+        entries = parsed.entries
+        assert len(entries) == 2
+        assert entries[0].title == "Decision 1"
+        assert entries[1].title == "Decision 2"
+
+        # Check GUID uniqueness
+        guids = [entry.id for entry in entries]
+        assert len(guids) == len(set(guids)), "GUIDs must be unique"
+
+        # Check each entry has required fields
+        for entry in entries:
+            assert hasattr(entry, "title")
+            assert hasattr(entry, "link")
+            assert hasattr(entry, "id")  # GUID
+            assert hasattr(entry, "published_parsed")  # pubDate
 
     def test_generate_creates_file(self, rss_generator, mock_config):
         """Test that generate() creates RSS file"""
