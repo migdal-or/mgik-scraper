@@ -225,7 +225,27 @@ mgik-scraper/
 ├── mgik_news.db             # SQLite database
 ├── attachments/             # Downloaded PDFs
 ├── tests/                   # Test suite directory
+├── .venv/                   # Python virtual environment
 └── README.md                # User-facing documentation
+```
+
+## Development Environment Setup
+
+**Python version**: This project uses `python3` (Python 3.13.5).
+
+**Virtual environment**: This project uses a virtual environment located in `.venv/`.
+
+**IMPORTANT**: Always activate the virtual environment before running any Python commands:
+```bash
+source .venv/bin/activate
+```
+
+After activation, you can use `python` and `pip` directly (they will point to the virtual environment).
+
+**Running tests**:
+```bash
+source venv/bin/activate
+pytest tests/test_scheduler.py -v
 ```
 
 ## Implementation Status
@@ -284,6 +304,41 @@ mgik-scraper/
 
 ### ⏳ Backlog Features
 
+- **Config validation** (#todo)
+  - Validate configuration on startup
+  - Check numeric values are in valid ranges (positive intervals, reasonable memory limits)
+  - Verify paths are writable
+  - Fail fast with clear error messages
+
+- **Error recovery improvements** (#todo)
+  - Uncomment sleep in scheduler exception handler (line 112 in scheduler.py)
+  - Add retry limits with exponential backoff for persistent errors
+  - Prevent infinite error loops (e.g., disk full, permission denied)
+
+- **RSS validation** (#todo)
+  - Parse generated RSS XML with `ET.fromstring()` before writing
+  - Catch malformed XML early to prevent corrupted feed files
+  - Add test to verify RSS validates against RSS 2.0 spec
+
+- **RSS feed improvements** (#todo)
+  - Add RSS XML validation before writing to catch formatting issues
+  - Consider adding more metadata (author, category, etc.)
+
+- **Attachment download improvements** (#todo)
+  - Add retry logic for failed downloads
+  - Track failed downloads in database and retry in future cycles
+  - Limit attachment file size (max 50MB) to prevent service hangs from extremely large files
+  - Add timeout for individual file downloads
+
+- **Health monitoring** (#todo)
+  - Add simple HTTP health endpoint or status file
+  - Report last successful fetch timestamp, record count, download stats
+  - Enable external monitoring
+
+- **Database optimization** (#todo)
+  - Consider connection pooling or persistent connections
+  - Add indexes on frequently queried columns (date, fetched_at)
+
 - **Predictive scheduling** (#todo)
   - Analyze `fetched_at` timestamps to find publication patterns
   - Build statistical model (time-of-day, day-of-week, intervals)
@@ -301,14 +356,23 @@ mgik-scraper/
 
 ### Security/Safety
 - **SSL verification disabled** (`verify=False` in requests calls)
-  - Reason: Unknown (possibly self-signed certificate on MGIK server?)
-  - Action needed: Enable SSL or document why it must be disabled
+  - **Rationale**: Intentionally disabled for this use case
+  - The scraper monitors a public government website for news announcements
+  - Content is public information, not sensitive data
+  - We trust the source domain (mosgorizbirkom.ru)
+  - Risk of MITM attack is acceptable: worst case is receiving fake news items, which is not a security concern for this application
+  - Full browser-style certificate validation is unnecessary complexity for this scraper
+  - If malicious content is injected, it's equivalent to the website being compromised (which we can't prevent anyway)
+  - **Trade-off**: Simplicity and reliability vs. defense against unlikely MITM attacks on public data
+  - Status: Accepted as-is, no action needed
 
 ### Testing
-- **No automated tests**
-  - `tests/` directory exists but is empty
-  - pytest and pytest-mock installed but unused
-  - Action needed: Write pytest suite for core functions
+- **Comprehensive test suite implemented** ✅
+  - All core modules have pytest tests
+  - 18 passing tests in test_scheduler.py
+  - Database isolation using tmp_path and patch.object()
+  - Proper mocking of external dependencies
+  - Test coverage includes success paths, error handling, and edge cases
 
 ### Configuration
 - **.env expressions not supported**
@@ -509,35 +573,92 @@ All functions that can fail return dict:
 
 ## Testing Strategy
 
+### Test Writing Standards
+
+**Import Formatting:**
+- Split multiple imports from the same module into separate lines for clarity
+- Order: standard library → third-party → local imports
+- Example:
+  ```python
+  # Good
+  import os
+  from unittest.mock import Mock
+  from unittest.mock import patch
+  import pytest
+  from attachments import AttachmentManager
+
+  # Bad
+  import os
+  import pytest
+  from unittest.mock import Mock, patch  # Don't combine
+  from attachments import AttachmentManager
+  ```
+
+**Database Testing:**
+- NEVER use the real database (`mgik_news.db`) in tests
+- Always use `tmp_path` fixture for temporary databases
+- Patch module-level variables with `patch.object(module, "variable", value)`
+- Example:
+  ```python
+  def test_something(self, tmp_path):
+      import datastore
+      db_path = tmp_path / "test.db"
+      with patch.object(datastore, "db_path", str(db_path)):
+          # Test code here
+  ```
+
+**File Operations:**
+- Always specify `encoding="utf-8"` when opening text files
+- Use `tmp_path` fixture for temporary files/directories
+- Let pytest handle cleanup automatically
+
+**Mocking:**
+- Mock external dependencies (HTTP requests, database, filesystem)
+- Use `@patch` decorator for patching functions/classes
+- Use `Mock(return_value=...)` instead of `lambda:` for callable mocks
+- Prefix intentionally unused parameters with underscore: `_mock_param`
+
+**Test Structure:**
+- Group related tests in classes
+- Use descriptive test names that explain what is being tested
+- Include docstrings for non-obvious test cases
+- Test both success and failure paths
+
 ### Unit Tests (pytest)
 
-**File**: `tests/test_worker.py`
-- `test_fetch_mgik_news_success()` - Mock successful API response
-- `test_fetch_mgik_news_timeout()` - Mock connection timeout
-- `test_fetch_mgik_news_invalid_json()` - Mock malformed response
-- `test_proxy_configuration()` - Verify proxy URL building
+**File**: `tests/test_mgik_website_worker.py`
+- `TestFetchMgikNews` - HTTP client with various error conditions
+- `TestFetchAttachment` - PDF download with error handling
+- `TestSaveToDatabase` - Database operations with real temp DB
+- `TestLoadDecisionsFromWebToDatabase` - Pagination logic with mocking
 
 **File**: `tests/test_datastore.py`
-- `test_save_decisions_new()` - Insert new records
-- `test_save_decisions_duplicates()` - Verify INSERT OR IGNORE
-- `test_get_all_files()` - Retrieve unique file URLs
-- `test_build_pdf_url()` - URL construction logic
+- Tests for database operations, versioning, URL building
+- Uses temporary in-memory SQLite databases
 
-### Integration Tests (pytest)
+**File**: `tests/test_attachments.py`
+- Tests for AttachmentManager with failure thresholds
+- Mocked database, real temporary filesystem
 
-**File**: `tests/test_integration.py`
-- `test_pagination_flow()` - Full pagination with mock API
-- `test_date_filtering()` - Stop at MGIK_EARLIEST_DATE
-- `test_duplicate_detection()` - Multiple fetches, same data
+**File**: `tests/test_output.py`
+- Tests for RSS generation and XML formatting
+- Validates XML structure and escaping
 
-### Manual Tests
-
-**Current**: `test_process_attachments.py`
-- Downloads PDFs to test attachment processing
-- Should be converted to proper pytest with mocking
+**File**: `tests/test_scheduler.py`
+- Tests for daemon scheduler workflow and backoff logic
+- All components mocked
 
 ### Test Fixtures
 
+**Shared fixtures** (`tests/conftest.py`):
+- `setup_test_env` - Sets up environment variables automatically
+- `sample_api_response` - Valid API response with items
+- `sample_api_response_last_page` - Last page (no next link)
+- `sample_api_response_empty` - Empty response
+- `sample_decisions` - Sample decision list
+- `mock_pdf_content` - Mock PDF file content
+
+**File fixtures** (`tests/fixtures/`):
 - `sample_api_response.json` - Valid API response with items
 - `sample_api_paginated.json` - Response with meta.next
 - `sample_api_empty.json` - Response with no items

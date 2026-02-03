@@ -1,0 +1,3 @@
+"""
+MGIK Scraper Test Suite
+"""
