@@ -29,7 +29,7 @@ class TestRSSGenerator:
     @pytest.fixture
     def mock_config(self, tmp_path):
         """Create mock configuration using test_env_config.json"""
-        with open(FIXTURES_DIR / "test_env_config.json") as f:
+        with open(FIXTURES_DIR / "test_env_config.json", encoding="utf-8") as f:
             config = json.load(f)
 
         # Add tmp_path dependent values
