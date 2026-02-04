@@ -1,0 +1,26 @@
+[
+  {
+    "internal_id": 1,
+    "mgik_id": "1",
+    "name": "Old Decision",
+    "number": "1/2025",
+    "date": "2025-01-10",
+    "file": "https://example.com/old.pdf"
+  },
+  {
+    "internal_id": 2,
+    "mgik_id": "2",
+    "name": "New Decision",
+    "number": "2/2025",
+    "date": "2025-01-20",
+    "file": "https://example.com/new.pdf"
+  },
+  {
+    "internal_id": 3,
+    "mgik_id": "3",
+    "name": "Middle Decision",
+    "number": "3/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/middle.pdf"
+  }
+]

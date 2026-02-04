@@ -1,0 +1,162 @@
+[
+  {
+    "internal_id": 1,
+    "mgik_id": "1",
+    "name": "Decision 1",
+    "number": "1/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file1.pdf"
+  },
+  {
+    "internal_id": 2,
+    "mgik_id": "2",
+    "name": "Decision 2",
+    "number": "2/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file2.pdf"
+  },
+  {
+    "internal_id": 3,
+    "mgik_id": "3",
+    "name": "Decision 3",
+    "number": "3/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file3.pdf"
+  },
+  {
+    "internal_id": 4,
+    "mgik_id": "4",
+    "name": "Decision 4",
+    "number": "4/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file4.pdf"
+  },
+  {
+    "internal_id": 5,
+    "mgik_id": "5",
+    "name": "Decision 5",
+    "number": "5/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file5.pdf"
+  },
+  {
+    "internal_id": 6,
+    "mgik_id": "6",
+    "name": "Decision 6",
+    "number": "6/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file6.pdf"
+  },
+  {
+    "internal_id": 7,
+    "mgik_id": "7",
+    "name": "Decision 7",
+    "number": "7/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file7.pdf"
+  },
+  {
+    "internal_id": 8,
+    "mgik_id": "8",
+    "name": "Decision 8",
+    "number": "8/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file8.pdf"
+  },
+  {
+    "internal_id": 9,
+    "mgik_id": "9",
+    "name": "Decision 9",
+    "number": "9/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file9.pdf"
+  },
+  {
+    "internal_id": 10,
+    "mgik_id": "10",
+    "name": "Decision 10",
+    "number": "10/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file10.pdf"
+  },
+  {
+    "internal_id": 11,
+    "mgik_id": "11",
+    "name": "Decision 11",
+    "number": "11/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file11.pdf"
+  },
+  {
+    "internal_id": 12,
+    "mgik_id": "12",
+    "name": "Decision 12",
+    "number": "12/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file12.pdf"
+  },
+  {
+    "internal_id": 13,
+    "mgik_id": "13",
+    "name": "Decision 13",
+    "number": "13/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file13.pdf"
+  },
+  {
+    "internal_id": 14,
+    "mgik_id": "14",
+    "name": "Decision 14",
+    "number": "14/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file14.pdf"
+  },
+  {
+    "internal_id": 15,
+    "mgik_id": "15",
+    "name": "Decision 15",
+    "number": "15/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file15.pdf"
+  },
+  {
+    "internal_id": 16,
+    "mgik_id": "16",
+    "name": "Decision 16",
+    "number": "16/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file16.pdf"
+  },
+  {
+    "internal_id": 17,
+    "mgik_id": "17",
+    "name": "Decision 17",
+    "number": "17/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file17.pdf"
+  },
+  {
+    "internal_id": 18,
+    "mgik_id": "18",
+    "name": "Decision 18",
+    "number": "18/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file18.pdf"
+  },
+  {
+    "internal_id": 19,
+    "mgik_id": "19",
+    "name": "Decision 19",
+    "number": "19/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file19.pdf"
+  },
+  {
+    "internal_id": 20,
+    "mgik_id": "20",
+    "name": "Decision 20",
+    "number": "20/2025",
+    "date": "2025-01-15",
+    "file": "https://example.com/file20.pdf"
+  }
+]

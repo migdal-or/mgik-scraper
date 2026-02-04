@@ -52,6 +52,11 @@ class ConfigValidator:
         self._validate_positive_int(
             "SCHEDULER_MAX_MEMORY_MB", "memory suicide threshold"
         )
+
+        # Positive floats
+        self._validate_positive_float(
+            "SCHEDULER_BACKOFF_MULTIPLIER", "backoff multiplier", min_value=1.0
+        )
         self._validate_positive_int("OUTPUT_MAX_ITEMS", "max RSS items")
         self._validate_positive_int(
             "ATTACHMENTS_MAX_FAILURES", "max consecutive attachment failures"
@@ -113,6 +118,26 @@ class ConfigValidator:
 
         if value <= 0:
             self.errors.append(f"{key} ({description}) must be positive, got {value}")
+
+    def _validate_positive_float(
+        self, key: str, description: str, min_value: float = 0.0
+    ):
+        """Validate that a value is a positive float >= min_value"""
+        value = self.config.get(key)
+        if value is None:
+            self.errors.append(f"{key} ({description}) is required")
+            return
+
+        if not isinstance(value, (int, float)):
+            self.errors.append(
+                f"{key} ({description}) must be a number, got {type(value).__name__}"
+            )
+            return
+
+        if value < min_value:
+            self.errors.append(
+                f"{key} ({description}) must be >= {min_value}, got {value}"
+            )
 
     def _validate_interval_relationship(self):
         """Validate that max interval >= default interval"""

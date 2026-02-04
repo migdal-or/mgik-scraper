@@ -49,6 +49,7 @@ def load_config():
         # Scheduler config
         "SCHEDULER_DEFAULT_INTERVAL": int(os.getenv("SCHEDULER_DEFAULT_INTERVAL")),
         "SCHEDULER_MAX_INTERVAL": int(os.getenv("SCHEDULER_MAX_INTERVAL")),
+        "SCHEDULER_BACKOFF_MULTIPLIER": float(os.getenv("SCHEDULER_BACKOFF_MULTIPLIER")),
         "SCHEDULER_MAX_MEMORY_MB": int(os.getenv("SCHEDULER_MAX_MEMORY_MB")),
         # Output config (RSS for now)
         "OUTPUT_PATH": os.getenv("OUTPUT_PATH"),

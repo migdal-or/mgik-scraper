@@ -433,11 +433,12 @@ pytest tests/test_scheduler.py -v
   - Connection pooling not needed (low frequency access, simple operations)
 
 - **Predictive scheduling** (#todo)
+  - Start with 8 hours defaults
   - Analyze `fetched_at` timestamps to find publication patterns
-  - Build statistical model (time-of-day, day-of-week, intervals)
-  - Predict next publish window
+  - Analyze time-of-day, day-of-week, intervals
+  - Halve intervals on match, leave as is on mismatch
   - Adaptive coefficient (1-32) for interval calculation
-  - Feedback loop: server unreachable → adjust coefficient
+  - Feedback loop: server unreachable → adjust coefficient x1.5
 
 - **SSH upload** (#todo)
   - Upload downloaded PDFs to remote server
@@ -477,12 +478,6 @@ pytest tests/test_scheduler.py -v
   - Cannot use `8*3600` in .env file
   - Must use actual numbers (28800)
   - Expressions only work in Python, not in .env parsing
-
-### Error Handling
-- **Fetch failures now properly propagate**
-  - Fixed: `load_decisions_from_web_to_database()` now raises RuntimeError on fetch failure
-  - This enables proper backoff behavior in scheduler
-  - Previously: failures were silently caught and treated as success
 
 ## Configuration Details
 

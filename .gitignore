@@ -9,7 +9,7 @@ attachments/
 .DS_Store
 .vscode/
 .env
-*.json
+./*.json
 *.db
 *.xml
 mgik-scraper.log*

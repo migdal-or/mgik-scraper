@@ -3,6 +3,8 @@ Tests for config_validator module
 """
 
 import pytest
+import json
+from pathlib import Path
 from config_validator import ConfigValidator
 from config_validator import ConfigValidationError
 from config_validator import validate_config
@@ -13,27 +15,30 @@ class TestConfigValidator:
 
     @pytest.fixture
     def valid_config(self, tmp_path):
-        """Create a valid configuration"""
-        return {
-            "MGIK_NEWS_URL": "https://example.com/api",
-            "MGIK_DB_PATH": str(tmp_path / "test.db"),
-            "OUTPUT_PATH": str(tmp_path / "feed.xml"),
-            "MGIK_BASE_URL": "https://example.com",
-            "RSS_FEED_TITLE": "Test Feed",
-            "RSS_FEED_DESCRIPTION": "Test Description",
-            "ATTACHMENTS_DIR": str(tmp_path / "attachments"),
-            "LOG_FILE": str(tmp_path / "test.log"),
-            "LOG_LEVEL": "INFO",
-            "SCHEDULER_DEFAULT_INTERVAL": 3600,
-            "SCHEDULER_MAX_INTERVAL": 28800,
-            "SCHEDULER_MAX_MEMORY_MB": 500,
-            "OUTPUT_MAX_ITEMS": 100,
-            "ATTACHMENTS_MAX_FAILURES": 3,
-            "ATTACHMENTS_MAX_SIZE_MB": 50,
-            "ATTACHMENTS_TIMEOUT": 600,
-            "LOG_MAX_BYTES": 10485760,
-            "LOG_BACKUP_COUNT": 5,
-        }
+        """Create a valid configuration using test_env_config.json"""
+        fixtures_dir = Path(__file__).parent / "fixtures"
+        with open(fixtures_dir / "test_env_config.json") as f:
+            config = json.load(f)
+
+        # Add tmp_path dependent values
+        config["MGIK_DB_PATH"] = str(tmp_path / "test.db")
+        config["OUTPUT_PATH"] = str(tmp_path / "feed.xml")
+        config["ATTACHMENTS_DIR"] = str(tmp_path / "attachments")
+        config["LOG_FILE"] = str(tmp_path / "test.log")
+
+        # Convert string values to appropriate types
+        config["SCHEDULER_DEFAULT_INTERVAL"] = int(config["SCHEDULER_DEFAULT_INTERVAL"])
+        config["SCHEDULER_MAX_INTERVAL"] = int(config["SCHEDULER_MAX_INTERVAL"])
+        config["SCHEDULER_BACKOFF_MULTIPLIER"] = float(config["SCHEDULER_BACKOFF_MULTIPLIER"])
+        config["SCHEDULER_MAX_MEMORY_MB"] = int(config["SCHEDULER_MAX_MEMORY_MB"])
+        config["OUTPUT_MAX_ITEMS"] = int(config["OUTPUT_MAX_ITEMS"])
+        config["ATTACHMENTS_MAX_FAILURES"] = int(config["ATTACHMENTS_MAX_FAILURES"])
+        config["ATTACHMENTS_MAX_SIZE_MB"] = int(config["ATTACHMENTS_MAX_SIZE_MB"])
+        config["ATTACHMENTS_TIMEOUT"] = int(config["ATTACHMENTS_TIMEOUT"])
+        config["LOG_MAX_BYTES"] = int(config["LOG_MAX_BYTES"])
+        config["LOG_BACKUP_COUNT"] = int(config["LOG_BACKUP_COUNT"])
+
+        return config
 
     def test_valid_config_passes(self, valid_config):
         """Test that a valid configuration passes validation"""

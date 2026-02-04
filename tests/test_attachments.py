@@ -3,6 +3,8 @@ Tests for attachments module
 """
 
 import os
+import json
+from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
 import pytest
@@ -14,14 +16,21 @@ class TestAttachmentManager:
 
     @pytest.fixture
     def mock_config(self, tmp_path):
-        """Create mock configuration"""
-        return {
-            "ATTACHMENTS_DIR": str(tmp_path / "attachments"),
-            "ATTACHMENTS_MAX_FAILURES": 3,
-            "ATTACHMENTS_MAX_SIZE_MB": 50,
-            "ATTACHMENTS_TIMEOUT": 600,
-            "MGIK_DB_PATH": str(tmp_path / "test.db"),
-        }
+        """Create mock configuration using test_env_config.json"""
+        fixtures_dir = Path(__file__).parent / "fixtures"
+        with open(fixtures_dir / "test_env_config.json", encoding="utf-8") as f:
+            config = json.load(f)
+
+        # Add tmp_path dependent values
+        config["MGIK_DB_PATH"] = str(tmp_path / "test.db")
+        config["ATTACHMENTS_DIR"] = str(tmp_path / "attachments")
+
+        # Convert string values to appropriate types
+        config["ATTACHMENTS_MAX_FAILURES"] = int(config["ATTACHMENTS_MAX_FAILURES"])
+        config["ATTACHMENTS_MAX_SIZE_MB"] = int(config["ATTACHMENTS_MAX_SIZE_MB"])
+        config["ATTACHMENTS_TIMEOUT"] = int(config["ATTACHMENTS_TIMEOUT"])
+
+        return config
 
     @pytest.fixture
     def attachment_manager(self, mock_config):

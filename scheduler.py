@@ -12,6 +12,8 @@ import psutil
 from mgik_website_worker import load_decisions_from_web_to_database
 from attachments import AttachmentManager
 from output import OutputManager
+from prediction import PublicationPredictor
+from datastore import DecisionsDatabase
 
 logger = logging.getLogger("mgik-scraper")
 
@@ -32,13 +34,23 @@ class DaemonScheduler:
         self.max_interval = config["SCHEDULER_MAX_INTERVAL"]
         self.max_memory_mb = config.get("SCHEDULER_MAX_MEMORY_MB")
 
+        # Backoff multiplier (configurable)
+        self.backoff_multiplier = config.get("SCHEDULER_BACKOFF_MULTIPLIER", 1.5)
+
         # Initialize components
         self.attachment_mgr = AttachmentManager(config)
         self.output_mgr = OutputManager(config)
 
+        # Initialize prediction module
+        db = DecisionsDatabase()
+        base_interval = config["SCHEDULER_DEFAULT_INTERVAL"]
+        self.predictor = PublicationPredictor(db, base_interval)
+
         logger.info(
-            "Scheduler initialized: interval=%ss, max_memory=%sMB",
+            "Scheduler initialized: interval=%ss, max_interval=%ss, backoff=%.1fx, max_memory=%sMB",
             self.current_interval,
+            self.max_interval,
+            self.backoff_multiplier,
             self.max_memory_mb,
         )
 
@@ -79,19 +91,40 @@ class DaemonScheduler:
                 else:
                     logger.info("No new content, skipping output generation")
 
-                # 4. Update check interval based on fetch result
-                # Reset to default interval on every cycle
-                self.current_interval = self.config["SCHEDULER_DEFAULT_INTERVAL"]
-
-                # Apply exponential backoff only when fetch fails AND no attachments downloaded
-                # This indicates complete failure (network issues, server down, etc.)
-                # Partial success (attachments downloaded) keeps normal interval
-                if fetch_result is None and downloaded_count == 0:
+                # 4. Update check interval based on result
+                # SUCCESS = either fetch succeeded with new records OR attachments downloaded
+                if (
+                    fetch_result is not None and fetch_result > 0
+                ) or downloaded_count > 0:
+                    # Use prediction to optimize interval
+                    prediction_coeff = self.predictor.get_coefficient()
+                    self.current_interval = int(
+                        self.config["SCHEDULER_DEFAULT_INTERVAL"] * prediction_coeff
+                    )
+                    logger.info(
+                        "Success (fetch=%s, attachments=%s), prediction coeff=%.2f → %.1f min",
+                        fetch_result if fetch_result is not None else 0,
+                        downloaded_count,
+                        prediction_coeff,
+                        self.current_interval / 60,
+                    )
+                elif fetch_result is None and downloaded_count == 0:
+                    # COMPLETE FAILURE: Apply backoff multiplier
                     self.current_interval = min(
-                        self.current_interval * 1.5, self.max_interval
+                        int(self.current_interval * self.backoff_multiplier),
+                        self.max_interval,
                     )
                     logger.warning(
-                        "Using backoff interval: %.1f min", self.current_interval / 60
+                        "Complete failure (fetch and attachments), backoff %.1fx → %.1f min (max %.1f min)",
+                        self.backoff_multiplier,
+                        self.current_interval / 60,
+                        self.max_interval / 60,
+                    )
+                else:
+                    # Fetch succeeded but no new records, keep current interval
+                    logger.info(
+                        "Fetch succeeded with 0 new records, keeping interval %.1f min",
+                        self.current_interval / 60,
                     )
 
                 # 5. Memory check before sleep
@@ -109,7 +142,7 @@ class DaemonScheduler:
 
             except (OSError, RuntimeError) as e:
                 logger.error("Daemon error in main loop: %s", e, exc_info=True)
-                # time.sleep(60)  # Wait 1 minute on error
+                # Continue running - no sleep, no exit
 
         logger.info("Daemon shutdown complete")
 

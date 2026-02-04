@@ -5,6 +5,8 @@ Tests for scheduler module
 from unittest.mock import Mock
 from unittest.mock import patch
 import pytest
+import json
+from pathlib import Path
 from scheduler import DaemonScheduler
 
 
@@ -13,28 +15,38 @@ class TestDaemonScheduler:
 
     @pytest.fixture
     def mock_config(self, tmp_path):
-        """Create mock configuration"""
-        return {
-            "SCHEDULER_DEFAULT_INTERVAL": 1800,
-            "SCHEDULER_MAX_INTERVAL": 28800,
-            "SCHEDULER_MAX_MEMORY_MB": 500,
-            "MGIK_DB_PATH": str(tmp_path / "test.db"),
-            "ATTACHMENTS_DIR": str(tmp_path / "attachments"),
-            "ATTACHMENTS_MAX_FAILURES": 3,
-            "OUTPUT_PATH": str(tmp_path / "feed.xml"),
-            "OUTPUT_MAX_ITEMS": 10,
-            "MGIK_BASE_URL": "https://example.com",
-            "RSS_FEED_TITLE": "Test Feed",
-            "RSS_FEED_DESCRIPTION": "Test Description",
-        }
+        """Create mock configuration using test_env_config.json"""
+        fixtures_dir = Path(__file__).parent / "fixtures"
+        with open(fixtures_dir / "test_env_config.json") as f:
+            config = json.load(f)
+
+        # Add tmp_path dependent values
+        config["MGIK_DB_PATH"] = str(tmp_path / "test.db")
+        config["OUTPUT_PATH"] = str(tmp_path / "feed.xml")
+        config["ATTACHMENTS_DIR"] = str(tmp_path / "attachments")
+        config["LOG_FILE"] = str(tmp_path / "test.log")
+
+        # Convert string values to appropriate types
+        config["SCHEDULER_DEFAULT_INTERVAL"] = int(config["SCHEDULER_DEFAULT_INTERVAL"])
+        config["SCHEDULER_MAX_INTERVAL"] = int(config["SCHEDULER_MAX_INTERVAL"])
+        config["SCHEDULER_BACKOFF_MULTIPLIER"] = float(config["SCHEDULER_BACKOFF_MULTIPLIER"])
+        config["SCHEDULER_MAX_MEMORY_MB"] = int(config["SCHEDULER_MAX_MEMORY_MB"])
+        config["OUTPUT_MAX_ITEMS"] = int(config["OUTPUT_MAX_ITEMS"])
+        config["ATTACHMENTS_MAX_FAILURES"] = int(config["ATTACHMENTS_MAX_FAILURES"])
+
+        return config
 
     @pytest.fixture
     def scheduler(self, mock_config):
         """Create DaemonScheduler with mocked components"""
-        with patch("scheduler.AttachmentManager"), patch("scheduler.OutputManager"):
+        with patch("scheduler.AttachmentManager"), patch(
+            "scheduler.OutputManager"
+        ), patch("scheduler.PublicationPredictor"):
             sched = DaemonScheduler(mock_config)
             sched.attachment_mgr = Mock()
             sched.output_mgr = Mock()
+            sched.predictor = Mock()
+            sched.predictor.get_coefficient.return_value = 1.0
             return sched
 
     def test_init(self, mock_config):
@@ -261,6 +273,7 @@ class TestDaemonScheduler:
         # max_interval is 28800, so set default to 20000 -> 20000 * 1.5 = 30000
         # (should cap to 28800)
         scheduler.config["SCHEDULER_DEFAULT_INTERVAL"] = 20000
+        scheduler.current_interval = 20000
 
         # Run one cycle then stop
         def stop_after_sleep(_interval):

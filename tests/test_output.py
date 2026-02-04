@@ -28,15 +28,18 @@ class TestRSSGenerator:
 
     @pytest.fixture
     def mock_config(self, tmp_path):
-        """Create mock configuration"""
-        return {
-            "OUTPUT_PATH": str(tmp_path / "feed.xml"),
-            "OUTPUT_MAX_ITEMS": 10,
-            "MGIK_BASE_URL": "https://www.example.com",
-            "RSS_FEED_TITLE": "Test Feed",
-            "RSS_FEED_DESCRIPTION": "Test Description",
-            "MGIK_DB_PATH": str(tmp_path / "test.db"),
-        }
+        """Create mock configuration using test_env_config.json"""
+        with open(FIXTURES_DIR / "test_env_config.json") as f:
+            config = json.load(f)
+
+        # Add tmp_path dependent values
+        config["OUTPUT_PATH"] = str(tmp_path / "feed.xml")
+        config["MGIK_DB_PATH"] = str(tmp_path / "test.db")
+
+        # Convert string values to appropriate types
+        config["OUTPUT_MAX_ITEMS"] = int(config["OUTPUT_MAX_ITEMS"])
+
+        return config
 
     @pytest.fixture
     def rss_generator(self, mock_config):
@@ -51,10 +54,10 @@ class TestRSSGenerator:
         with patch("output.DecisionsDatabase"):
             generator = RSSGenerator(mock_config)
             assert generator.output_path == mock_config["OUTPUT_PATH"]
-            assert generator.max_items == 10
-            assert generator.base_url == "https://www.example.com"
-            assert generator.feed_title == "Test Feed"
-            assert generator.feed_description == "Test Description"
+            assert generator.max_items == mock_config["OUTPUT_MAX_ITEMS"]
+            assert generator.base_url == mock_config["MGIK_BASE_URL"]
+            assert generator.feed_title == mock_config["RSS_FEED_TITLE"]
+            assert generator.feed_description == mock_config["RSS_FEED_DESCRIPTION"]
 
     def test_escape_xml(self, rss_generator):
         """Test XML special character escaping"""
@@ -145,7 +148,7 @@ class TestRSSGenerator:
         # Check feed metadata
         assert "<title>Test Feed</title>" in xml
         assert "<description>Test Description</description>" in xml
-        assert "<link>https://www.example.com</link>" in xml
+        assert "<link>https://www.mosgorizbirkom.ru</link>" in xml
         assert "<language>ru</language>" in xml
 
         # Check items
@@ -196,7 +199,7 @@ class TestRSSGenerator:
         # Check feed metadata (feedparser returns FeedParserDict with dynamic attributes)
         feed_info = cast(dict, parsed.feed)
         assert feed_info.get("title") == "Test Feed"
-        assert feed_info.get("link") == "https://www.example.com"
+        assert feed_info.get("link") == "https://www.mosgorizbirkom.ru"
         assert feed_info.get("description") == "Test Description"
         assert feed_info.get("language") == "ru"
 
