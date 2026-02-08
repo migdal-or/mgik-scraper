@@ -89,6 +89,7 @@ LOG_BACKUP_COUNT=5
 
 ### Manual database intervention
 `sqlite3 mgik_news.db "DELETE FROM decisions WHERE mgik_id IN ('1', '2');"`
+`sqlite3 mgik_news.db "DELETE FROM decisions WHERE fetched_at > '2026-02-01T00:00:00';"`
 
 ### Running
 
