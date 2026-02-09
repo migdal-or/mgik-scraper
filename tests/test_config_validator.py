@@ -2,9 +2,9 @@
 Tests for config_validator module
 """
 
-import pytest
 import json
 from pathlib import Path
+import pytest
 from config_validator import ConfigValidator
 from config_validator import ConfigValidationError
 from config_validator import validate_config
@@ -17,7 +17,7 @@ class TestConfigValidator:
     def valid_config(self, tmp_path):
         """Create a valid configuration using test_env_config.json"""
         fixtures_dir = Path(__file__).parent / "fixtures"
-        with open(fixtures_dir / "test_env_config.json") as f:
+        with open(fixtures_dir / "test_env_config.json", encoding="utf-8") as f:
             config = json.load(f)
 
         # Add tmp_path dependent values
@@ -29,7 +29,9 @@ class TestConfigValidator:
         # Convert string values to appropriate types
         config["SCHEDULER_DEFAULT_INTERVAL"] = int(config["SCHEDULER_DEFAULT_INTERVAL"])
         config["SCHEDULER_MAX_INTERVAL"] = int(config["SCHEDULER_MAX_INTERVAL"])
-        config["SCHEDULER_BACKOFF_MULTIPLIER"] = float(config["SCHEDULER_BACKOFF_MULTIPLIER"])
+        config["SCHEDULER_BACKOFF_MULTIPLIER"] = float(
+            config["SCHEDULER_BACKOFF_MULTIPLIER"]
+        )
         config["SCHEDULER_MAX_MEMORY_MB"] = int(config["SCHEDULER_MAX_MEMORY_MB"])
         config["OUTPUT_MAX_ITEMS"] = int(config["OUTPUT_MAX_ITEMS"])
         config["ATTACHMENTS_MAX_FAILURES"] = int(config["ATTACHMENTS_MAX_FAILURES"])
@@ -385,3 +387,33 @@ class TestConfigValidator:
         valid_config["ATTACHMENTS_TIMEOUT"] = 3600
         validator = ConfigValidator(valid_config)
         validator.validate_all()
+
+    def test_timezone_must_be_set(self, valid_config):
+        """Test that MGIK_TIMEZONE must be set"""
+        del valid_config["MGIK_TIMEZONE"]
+        validator = ConfigValidator(valid_config)
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validator.validate_all()
+
+        assert "MGIK_TIMEZONE" in str(exc_info.value)
+
+    def test_valid_timezone_names(self, valid_config):
+        """Test that valid IANA timezone names pass validation"""
+        valid_timezones = ["Europe/Moscow", "UTC", "America/New_York", "Asia/Tokyo"]
+
+        for tz_name in valid_timezones:
+            valid_config["MGIK_TIMEZONE"] = tz_name
+            validator = ConfigValidator(valid_config)
+            validator.validate_all()  # Should not raise
+
+    def test_invalid_timezone_name(self, valid_config):
+        """Test that invalid timezone names are caught"""
+        valid_config["MGIK_TIMEZONE"] = "Invalid/Timezone"
+        validator = ConfigValidator(valid_config)
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validator.validate_all()
+
+        assert "MGIK_TIMEZONE" in str(exc_info.value)
+        assert "Invalid/Timezone" in str(exc_info.value)

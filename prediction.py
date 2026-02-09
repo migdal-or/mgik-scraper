@@ -11,6 +11,7 @@ from typing import Dict
 from typing import Union
 import logging
 from datastore import DecisionsDatabase
+from datastore import mgik_timezone
 
 logger = logging.getLogger("mgik-scraper")
 
@@ -47,7 +48,7 @@ class PublicationPredictor:
         Returns:
             float: Coefficient (raw score, minimum 1.0 to avoid division issues)
         """
-        current_time = datetime.now()
+        current_time = datetime.now(mgik_timezone)
         patterns = self.analyze_patterns()
 
         score = self._calculate_match_score(current_time, patterns)

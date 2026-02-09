@@ -16,6 +16,8 @@ pytest tests/ -v
 - Files: specify `encoding="utf-8"`
 - Unused params: prefix with `_`
 - No complex expressions in curly brackets, calculate them on the previous line.
+- Never add linter ignores or similar patches, code must be maximum clear.
+- Always confirm code quality with pylint.
 
 ## Quick Reference
 

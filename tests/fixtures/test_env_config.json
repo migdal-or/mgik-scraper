@@ -7,6 +7,7 @@
   "SCHEDULER_MAX_INTERVAL": "28800",
   "SCHEDULER_BACKOFF_MULTIPLIER": "1.5",
   "SCHEDULER_MAX_MEMORY_MB": "500",
+  "MGIK_TIMEZONE": "Europe/Moscow",
   "OUTPUT_MAX_ITEMS": "100",
   "MGIK_BASE_URL": "https://www.mosgorizbirkom.ru",
   "RSS_FEED_TITLE": "Test Feed",

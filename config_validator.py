@@ -7,6 +7,8 @@ Checks types, ranges, file paths, and logical constraints.
 
 import os
 from pathlib import Path
+from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfoNotFoundError
 
 
 class ConfigValidationError(Exception):
@@ -64,7 +66,9 @@ class ConfigValidator:
         self._validate_positive_int(
             "ATTACHMENTS_MAX_SIZE_MB", "max attachment file size"
         )
-        self._validate_positive_int("ATTACHMENTS_TIMEOUT", "attachment download timeout")
+        self._validate_positive_int(
+            "ATTACHMENTS_TIMEOUT", "attachment download timeout"
+        )
         self._validate_positive_int("LOG_MAX_BYTES", "max log file size")
         self._validate_positive_int("LOG_BACKUP_COUNT", "number of log backups")
 
@@ -87,6 +91,9 @@ class ConfigValidator:
         # URL validations
         self._validate_url("MGIK_NEWS_URL")
         self._validate_url("MGIK_BASE_URL")
+
+        # Timezone validation
+        self._validate_timezone("MGIK_TIMEZONE")
 
         # If any errors, raise with all error messages
         if self.errors:
@@ -235,7 +242,9 @@ class ConfigValidator:
                 try:
                     path.mkdir(parents=True, exist_ok=True)
                 except (OSError, PermissionError) as e:
-                    self.errors.append(f"{key} ({path_str}): Cannot create directory - {e}")
+                    self.errors.append(
+                        f"{key} ({path_str}): Cannot create directory - {e}"
+                    )
                     return
             else:
                 # Check if parent directory exists
@@ -309,6 +318,23 @@ class ConfigValidator:
 
         if not url.startswith(("http://", "https://")):
             self.errors.append(f"{key} ({url}): Must start with http:// or https://")
+
+    def _validate_timezone(self, key: str):
+        """Validate that timezone is a valid IANA timezone name"""
+        tz_name = self.config.get(key)
+
+        if not tz_name or not isinstance(tz_name, str):
+            self.errors.append(
+                f"{key} is required and must be a valid timezone name "
+                f"(e.g., 'Europe/Moscow')"
+            )
+            return
+
+        # Try to load the timezone to verify it's valid
+        try:
+            ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError as e:
+            self.errors.append(f"{key} ('{tz_name}'): Invalid timezone name - {e}")
 
 
 def validate_config(config: dict):

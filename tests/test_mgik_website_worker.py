@@ -14,6 +14,7 @@ from mgik_website_worker import (
     load_decisions_from_web_to_database,
     save_to_database,
 )
+import datastore
 
 
 class TestFetchMgikNews:
@@ -209,9 +210,7 @@ class TestFetchAttachment:
         mock_get.return_value = mock_response
 
         with patch("builtins.open", new_callable=mock_open):
-            fetch_attachment(
-                "http://test.com/file.pdf", "/tmp/test.pdf", timeout=600
-            )
+            fetch_attachment("http://test.com/file.pdf", "/tmp/test.pdf", timeout=600)
 
         # Verify timeout parameter was passed to requests.get
         call_kwargs = mock_get.call_args[1]
@@ -223,7 +222,6 @@ class TestSaveToDatabase:
 
     def test_save_new_decisions(self, tmp_path):
         """Test saving new decisions to database"""
-        import datastore
 
         # Setup temporary database - patch the module-level db_path variable
         db_path = tmp_path / "test_save.db"
@@ -258,7 +256,6 @@ class TestSaveToDatabase:
 
     def test_save_with_duplicates(self, tmp_path):
         """Test saving decisions with duplicates"""
-        import datastore
 
         # Setup temporary database - patch the module-level db_path variable
         db_path = tmp_path / "test_duplicates.db"

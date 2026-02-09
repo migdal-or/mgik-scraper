@@ -3,9 +3,9 @@ Pytest configuration - environment setup only
 Environment config loaded from tests/fixtures/test_env_config.json
 """
 
-import pytest
 import json
 from pathlib import Path
+import pytest
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +17,7 @@ def setup_test_env(monkeypatch, tmp_path):
     """
     # Load base env config from fixture
     fixtures_dir = Path(__file__).parent / "fixtures"
-    with open(fixtures_dir / "test_env_config.json") as f:
+    with open(fixtures_dir / "test_env_config.json", encoding="utf-8") as f:
         test_env = json.load(f)
 
     # Add tmp_path dependent values

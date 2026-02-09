@@ -8,7 +8,7 @@ Supports deduplication of identical versions across multiple scrapes.
 import sqlite3
 from typing import List, Dict
 from datetime import datetime
-from datetime import timezone
+from zoneinfo import ZoneInfo
 import os
 from urllib.parse import urlparse
 from urllib.parse import urljoin
@@ -31,6 +31,10 @@ _mgik_news_url = os.getenv("MGIK_NEWS_URL")
 if not _mgik_news_url:
     raise ValueError("MGIK_NEWS_URL variable must be set in a .env file")
 mgik_news_url: str = _mgik_news_url
+_mgik_timezone = os.getenv("MGIK_TIMEZONE")
+if not _mgik_timezone:
+    raise ValueError("MGIK_TIMEZONE variable must be set in a .env file")
+mgik_timezone = ZoneInfo(_mgik_timezone)
 
 
 class DecisionsDatabase:
@@ -39,7 +43,7 @@ class DecisionsDatabase:
 
     - Persists every unique decision version (mgik_id + content fields)
     - Deduplicates identical decisions across fetches
-    - Tracks UTC fetch timestamps for temporal analysis
+    - Tracks fetch timestamps in configured timezone for temporal analysis
     - Provides ordered access to decision history
     """
 
@@ -102,7 +106,7 @@ class DecisionsDatabase:
         Deduplication handled by UNIQUE constraint with INSERT OR IGNORE.
         """
 
-        fetched_at = datetime.now(timezone.utc).isoformat()
+        fetched_at = datetime.now(mgik_timezone).isoformat()
 
         rows = []
         for item in decisions:

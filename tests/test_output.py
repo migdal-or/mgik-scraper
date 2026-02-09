@@ -9,10 +9,12 @@ from typing import cast
 from unittest.mock import Mock
 from unittest.mock import patch
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
 import pytest
 import feedparser
 from output import RSSGenerator
+import datastore
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -284,3 +286,137 @@ class TestRSSGenerator:
 
         # Temp file should not exist after (should be cleaned up via rename)
         assert not os.path.exists(temp_path)
+
+
+class TestOutputTimezone:
+    """Tests for timezone-aware RSS output"""
+
+    @pytest.fixture
+    def mock_config(self, tmp_path):
+        """Create mock configuration"""
+        with open(FIXTURES_DIR / "test_env_config.json", encoding="utf-8") as f:
+            config = json.load(f)
+
+        config["OUTPUT_PATH"] = str(tmp_path / "feed.xml")
+        config["MGIK_DB_PATH"] = str(tmp_path / "test.db")
+        config["OUTPUT_MAX_ITEMS"] = int(config["OUTPUT_MAX_ITEMS"])
+
+        return config
+
+    @pytest.fixture
+    def rss_generator(self, mock_config):
+        """Create RSSGenerator with mocked database"""
+        with patch("output.DecisionsDatabase"):
+            generator = RSSGenerator(mock_config)
+            generator.db = Mock()
+            return generator
+
+    def test_build_date_uses_configured_timezone(self, rss_generator):
+        """Test that RSS build date uses configured timezone, not UTC"""
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        mock_time = datetime(2026, 2, 9, 15, 30, 0, tzinfo=moscow_tz)
+
+        with patch("output.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_time
+            mock_datetime.strptime = datetime.strptime
+            mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+
+            decisions = []
+            xml = rss_generator.build_rss_xml(decisions)
+
+            # Verify datetime.now was called with timezone
+            mock_datetime.now.assert_called_once_with(datastore.mgik_timezone)
+
+            # Build date should be present in XML
+            assert "<lastBuildDate>" in xml
+            assert "</lastBuildDate>" in xml
+
+    def test_format_rfc822_with_moscow_datetime(self, rss_generator):
+        """Test RFC822 formatting with Moscow timezone datetime"""
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        moscow_dt = datetime(2026, 2, 9, 15, 30, 0, tzinfo=moscow_tz)
+
+        result = rss_generator.format_rfc822(moscow_dt)
+
+        # Should produce valid RFC822 date
+        assert "2026" in result
+        assert result is not None
+        assert len(result) > 0
+
+    def test_format_rfc822_from_date_fallback_uses_configured_timezone(
+        self, rss_generator
+    ):
+        """Test that invalid date fallback uses configured timezone"""
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        mock_time = datetime(2026, 2, 9, 12, 0, 0, tzinfo=moscow_tz)
+
+        with patch("output.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_time
+            mock_datetime.strptime.side_effect = ValueError("Invalid date")
+            mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+
+            # Call with invalid date to trigger fallback
+            result = rss_generator.format_rfc822_from_date("invalid-date")
+
+            # Should call datetime.now with timezone
+            mock_datetime.now.assert_called_once_with(datastore.mgik_timezone)
+
+            # Should return a valid RFC822 date
+            assert result is not None
+            assert len(result) > 0
+
+    def test_moscow_midnight_in_rss_build_date(self, rss_generator):
+        """Test that Moscow midnight is handled correctly in RSS build date"""
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        moscow_midnight = datetime(2026, 2, 9, 0, 0, 0, tzinfo=moscow_tz)
+
+        with patch("output.datetime") as mock_datetime:
+            mock_datetime.now.return_value = moscow_midnight
+            mock_datetime.strptime = datetime.strptime
+            mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+
+            decisions = []
+            xml = rss_generator.build_rss_xml(decisions)
+
+            # Should not crash and should produce valid XML
+            assert '<?xml version="1.0" encoding="UTF-8"?>' in xml
+            assert "<lastBuildDate>" in xml
+
+    def test_rss_dates_consistent_with_timezone(self, rss_generator, mock_config):
+        """Test that all dates in RSS feed use consistent timezone"""
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        current_time = datetime(2026, 2, 9, 15, 0, 0, tzinfo=moscow_tz)
+
+        with patch("output.datetime") as mock_datetime:
+            mock_datetime.now.return_value = current_time
+            mock_datetime.strptime = datetime.strptime
+            mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+
+            decisions = [
+                {
+                    "internal_id": 1,
+                    "mgik_id": "123",
+                    "name": "Test Decision",
+                    "number": "1/2025",
+                    "date": "2026-02-09",
+                    "file": "https://example.com/test.pdf",
+                    "fetched_at": "2026-02-09T15:00:00+03:00",
+                }
+            ]
+
+            rss_generator.db.get_all.return_value = decisions
+            rss_generator.generate()
+
+            # Read generated RSS
+            with open(mock_config["OUTPUT_PATH"], "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # Verify RSS is valid XML
+            try:
+                ET.fromstring(content)
+            except ET.ParseError as e:
+                pytest.fail(f"Generated RSS with Moscow timezone is not valid XML: {e}")
+
+            # Verify build date is present
+            assert "<lastBuildDate>" in content
+            assert "</lastBuildDate>" in content

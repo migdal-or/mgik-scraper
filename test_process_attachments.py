@@ -1,3 +1,7 @@
+"""
+Test script for process_attachments function
+"""
+
 import json
 from mgik_website_worker import process_attachments
 

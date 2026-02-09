@@ -2,11 +2,11 @@
 Tests for scheduler module
 """
 
+import json
 from unittest.mock import Mock
 from unittest.mock import patch
-import pytest
-import json
 from pathlib import Path
+import pytest
 from scheduler import DaemonScheduler
 
 
@@ -17,7 +17,7 @@ class TestDaemonScheduler:
     def mock_config(self, tmp_path):
         """Create mock configuration using test_env_config.json"""
         fixtures_dir = Path(__file__).parent / "fixtures"
-        with open(fixtures_dir / "test_env_config.json") as f:
+        with open(fixtures_dir / "test_env_config.json", encoding="utf-8") as f:
             config = json.load(f)
 
         # Add tmp_path dependent values
@@ -29,7 +29,9 @@ class TestDaemonScheduler:
         # Convert string values to appropriate types
         config["SCHEDULER_DEFAULT_INTERVAL"] = int(config["SCHEDULER_DEFAULT_INTERVAL"])
         config["SCHEDULER_MAX_INTERVAL"] = int(config["SCHEDULER_MAX_INTERVAL"])
-        config["SCHEDULER_BACKOFF_MULTIPLIER"] = float(config["SCHEDULER_BACKOFF_MULTIPLIER"])
+        config["SCHEDULER_BACKOFF_MULTIPLIER"] = float(
+            config["SCHEDULER_BACKOFF_MULTIPLIER"]
+        )
         config["SCHEDULER_MAX_MEMORY_MB"] = int(config["SCHEDULER_MAX_MEMORY_MB"])
         config["OUTPUT_MAX_ITEMS"] = int(config["OUTPUT_MAX_ITEMS"])
         config["ATTACHMENTS_MAX_FAILURES"] = int(config["ATTACHMENTS_MAX_FAILURES"])

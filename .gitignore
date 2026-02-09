@@ -13,3 +13,4 @@ attachments/
 *.db
 *.xml
 mgik-scraper.log*
+.coverage

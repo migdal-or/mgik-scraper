@@ -11,6 +11,7 @@ from datetime import datetime
 from email.utils import formatdate
 import feedparser
 from datastore import DecisionsDatabase
+from datastore import mgik_timezone
 
 logger = logging.getLogger("mgik-scraper")
 
@@ -167,7 +168,7 @@ class RSSGenerator:
         escaped_title = self.escape_xml(self.feed_title)
         escaped_url = self.escape_xml(self.base_url)
         escaped_description = self.escape_xml(self.feed_description)
-        build_date = self.format_rfc822(datetime.now())
+        build_date = self.format_rfc822(datetime.now(mgik_timezone))
         items_xml = "".join(items)
 
         channel_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -272,4 +273,4 @@ class RSSGenerator:
             dt = datetime.strptime(date_str, "%Y-%m-%d")
             return self.format_rfc822(dt)
         except (ValueError, TypeError):
-            return self.format_rfc822(datetime.now())
+            return self.format_rfc822(datetime.now(mgik_timezone))

@@ -2,13 +2,19 @@
 Tests for datastore module
 """
 
+import importlib
 import sqlite3
 import time
+import os
+from pathlib import Path
 from unittest.mock import patch
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import pytest
 import datastore
 from datastore import build_pdf_url
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 class TestBuildPdfUrl:
@@ -305,3 +311,213 @@ class TestDecisionsDatabase:
         with sqlite3.connect(temp_db.db_path) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM decisions")
             assert cursor.fetchone()[0] == 2
+
+
+class TestTimezoneConfiguration:
+    """Tests for timezone configuration"""
+
+    def test_timezone_loads_from_config(self):
+        """Test that timezone from config loads into datastore object"""
+        # Save original
+        original_tz = str(datastore.mgik_timezone)
+
+        # Test with Moscow
+        with patch.dict(os.environ, {"MGIK_TIMEZONE": "Europe/Moscow"}, clear=False):
+            importlib.reload(datastore)
+            assert datastore.mgik_timezone == ZoneInfo("Europe/Moscow")
+            assert str(datastore.mgik_timezone) == "Europe/Moscow"
+
+        # Restore original
+        with patch.dict(os.environ, {"MGIK_TIMEZONE": original_tz}, clear=False):
+            importlib.reload(datastore)
+
+    def test_different_timezones_load_correctly(self):
+        """Test that different timezone names load into datastore object"""
+        # Save original
+        original_tz = str(datastore.mgik_timezone)
+
+        test_timezones = ["UTC", "America/New_York", "Asia/Tokyo"]
+
+        for tz_name in test_timezones:
+            with patch.dict(os.environ, {"MGIK_TIMEZONE": tz_name}, clear=False):
+                importlib.reload(datastore)
+                # Verify the timezone object is loaded correctly
+                assert datastore.mgik_timezone == ZoneInfo(tz_name)
+                assert str(datastore.mgik_timezone) == tz_name
+
+        # Restore original
+        with patch.dict(os.environ, {"MGIK_TIMEZONE": original_tz}, clear=False):
+            importlib.reload(datastore)
+
+    def test_invalid_timezone_fails_on_reload(self):
+        """Test that invalid timezone name fails when loading"""
+        # Save original
+        original_tz = str(datastore.mgik_timezone)
+
+        try:
+            with patch.dict(
+                os.environ, {"MGIK_TIMEZONE": "Invalid/Timezone"}, clear=False
+            ):
+                # Should raise exception when reloading with invalid timezone
+                with pytest.raises(Exception):  # ZoneInfo error
+                    importlib.reload(datastore)
+        finally:
+            # Restore original
+            with patch.dict(os.environ, {"MGIK_TIMEZONE": original_tz}, clear=False):
+                importlib.reload(datastore)
+
+
+class TestTimestampStorage:
+    """Tests for timestamp storage in configured timezone"""
+
+    @pytest.fixture
+    def temp_db(self, tmp_path):
+        """Create temporary database for testing"""
+        db_path = tmp_path / "test.db"
+
+        with patch.object(datastore, "db_path", str(db_path)):
+            with patch.object(
+                datastore, "mgik_news_url", "https://www.example.com/api/news"
+            ):
+                db = datastore.DecisionsDatabase()
+                yield db
+
+    def test_fetched_at_stores_moscow_time_not_utc(self, temp_db):
+        """Test that fetched_at stores Moscow local time, not UTC"""
+        # Mock datetime.now to return a specific Moscow time
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        mock_time = datetime(2026, 2, 9, 15, 30, 0, tzinfo=moscow_tz)  # 15:30 MSK
+
+        with patch("datastore.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_time
+            mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+
+            decisions = [
+                {
+                    "id": "123",
+                    "name": "Test Decision",
+                    "number": "1/2025",
+                    "date": "2025-01-15",
+                    "file": "/upload/test.pdf",
+                }
+            ]
+
+            temp_db.save_decisions(decisions)
+
+        # Verify the stored timestamp reflects Moscow time (hour 15), not UTC
+        with sqlite3.connect(temp_db.db_path) as conn:
+            cursor = conn.execute("SELECT fetched_at FROM decisions")
+            fetched_at_str = cursor.fetchone()[0]
+
+            # Parse the stored timestamp
+            stored_dt = datetime.fromisoformat(fetched_at_str)
+
+            # The hour should be 15 (Moscow), not 12 (UTC)
+            assert stored_dt.hour == 15, f"Expected hour 15 (MSK), got {stored_dt.hour}"
+
+    def test_moscow_midnight_stores_as_zero_not_21_or_23(self, temp_db):
+        """
+        CRITICAL: Test the bug fix - Moscow midnight (00:00) should store as 00:00,
+        not as 21:00 or 23:00 (which would be the UTC equivalent)
+        """
+        # Mock datetime.now to return Moscow midnight
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        mock_time = datetime(2026, 2, 9, 0, 0, 0, tzinfo=moscow_tz)  # 00:00 MSK
+
+        with patch("datastore.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_time
+            mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+
+            decisions = [
+                {
+                    "id": "123",
+                    "name": "Midnight Decision",
+                    "number": "1/2025",
+                    "date": "2025-01-15",
+                    "file": "/upload/test.pdf",
+                }
+            ]
+
+            temp_db.save_decisions(decisions)
+
+        # Verify the stored timestamp has hour 00, not 21 or 23
+        with sqlite3.connect(temp_db.db_path) as conn:
+            cursor = conn.execute("SELECT fetched_at FROM decisions")
+            fetched_at_str = cursor.fetchone()[0]
+
+            # Parse the stored timestamp
+            stored_dt = datetime.fromisoformat(fetched_at_str)
+
+            # CRITICAL: Hour must be 0 (Moscow midnight), not 21 or 23 (UTC)
+            assert (
+                stored_dt.hour == 0
+            ), f"Moscow midnight stored as hour {stored_dt.hour}, not 0 (the bug!)"
+
+    def test_stored_timestamp_parseable_for_hour_extraction(self, temp_db):
+        """Test that stored timestamps can be parsed back for hour extraction"""
+        decisions = [
+            {
+                "id": "123",
+                "name": "Test Decision",
+                "number": "1/2025",
+                "date": "2025-01-15",
+                "file": "/upload/test.pdf",
+            }
+        ]
+
+        temp_db.save_decisions(decisions)
+
+        # Retrieve and parse the timestamp
+        with sqlite3.connect(temp_db.db_path) as conn:
+            cursor = conn.execute("SELECT fetched_at FROM decisions")
+            fetched_at_str = cursor.fetchone()[0]
+
+            # Should be parseable
+            parsed_dt = datetime.fromisoformat(fetched_at_str)
+
+            # Should be able to extract hour
+            assert isinstance(parsed_dt.hour, int)
+            assert 0 <= parsed_dt.hour <= 23
+
+    def test_multiple_timezones_store_correctly(self, temp_db):
+        """Test that different configured timezones store their local time"""
+        test_cases = [
+            ("Europe/Moscow", 10, 10),  # 10:00 MSK → stores as 10
+            ("UTC", 10, 10),  # 10:00 UTC → stores as 10
+            ("America/New_York", 10, 10),  # 10:00 EST → stores as 10
+        ]
+
+        for tz_name, input_hour, expected_hour in test_cases:
+            with patch.object(datastore, "mgik_timezone", ZoneInfo(tz_name)):
+                mock_time = datetime(
+                    2026, 2, 9, input_hour, 0, 0, tzinfo=ZoneInfo(tz_name)
+                )
+
+                with patch("datastore.datetime") as mock_datetime:
+                    mock_datetime.now.return_value = mock_time
+                    mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+
+                    decisions = [
+                        {
+                            "id": f"test_{tz_name}",
+                            "name": f"Decision {tz_name}",
+                            "number": "1/2025",
+                            "date": "2025-01-15",
+                            "file": f"/upload/{tz_name}.pdf",
+                        }
+                    ]
+
+                    temp_db.save_decisions(decisions)
+
+                    # Verify stored hour matches local time
+                    with sqlite3.connect(temp_db.db_path) as conn:
+                        cursor = conn.execute(
+                            "SELECT fetched_at FROM decisions WHERE mgik_id = ?",
+                            (f"test_{tz_name}",),
+                        )
+                        fetched_at_str = cursor.fetchone()[0]
+                        stored_dt = datetime.fromisoformat(fetched_at_str)
+
+                        assert (
+                            stored_dt.hour == expected_hour
+                        ), f"{tz_name}: Expected hour {expected_hour}, got {stored_dt.hour}"

@@ -115,7 +115,8 @@ class DaemonScheduler:
                         self.max_interval,
                     )
                     logger.warning(
-                        "Complete failure (fetch and attachments), backoff %.1fx → %.1f min (max %.1f min)",
+                        "Complete failure (fetch and attachments), backoff %.1fx → "
+                        "%.1f min (max %.1f min)",
                         self.backoff_multiplier,
                         self.current_interval / 60,
                         self.max_interval / 60,
