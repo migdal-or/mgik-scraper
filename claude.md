@@ -1,6 +1,8 @@
 # MGIK Scraper
-
 Web scraper monitoring Moscow City Election Commission's news API. Daemon with adaptive intervals, version history, PDF downloads, RSS generation.
+
+This project relies on python virtual environment.
+Always activate venv to run tests or the code itself.
 
 ## Tests
 ```bash
@@ -13,6 +15,7 @@ pytest tests/ -v
 - Database: always `tmp_path`, patch with `patch.object(datastore, "db_path", str(db_path))`
 - Files: specify `encoding="utf-8"`
 - Unused params: prefix with `_`
+- No complex expressions in curly brackets, calculate them on the previous line.
 
 ## Quick Reference
 

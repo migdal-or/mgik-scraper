@@ -96,13 +96,13 @@ class DaemonScheduler:
                 if (
                     fetch_result is not None and fetch_result > 0
                 ) or downloaded_count > 0:
-                    # Use prediction to optimize interval
+                    # Apply prediction to current interval
                     prediction_coeff = self.predictor.get_coefficient()
                     self.current_interval = int(
-                        self.config["SCHEDULER_DEFAULT_INTERVAL"] * prediction_coeff
+                        self.current_interval / prediction_coeff
                     )
                     logger.info(
-                        "Success (fetch=%s, attachments=%s), prediction coeff=%.2f → %.1f min",
+                        "Success (fetch=%s, attachments=%s), prediction coeff=%.1f → %.1f min",
                         fetch_result if fetch_result is not None else 0,
                         downloaded_count,
                         prediction_coeff,

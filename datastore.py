@@ -171,32 +171,20 @@ class DecisionsDatabase:
                 for row in cursor.fetchall()
             ]
 
-    def get_publication_timestamps(self, limit: int = 1000) -> List[Dict]:
+    def get_publication_timestamps(self) -> List[Dict]:
         """
-        Get recent publication timestamps for pattern analysis.
+        Get all publication timestamps for pattern analysis.
 
         Returns list of dicts with:
         - date: Decision publication date (from 'date' field)
         - fetched_at: When we discovered it (from 'fetched_at' field)
 
-        Orders by fetched_at DESC to get most recent data.
-        Groups by mgik_id to avoid duplicates (get first fetch only).
-
-        Args:
-            limit: Maximum number of records to return (default 1000)
+        Returns ALL records. No GROUP BY, no LIMIT, no ORDER BY.
+        Multiple decisions at the same time = higher pattern weight.
 
         Returns:
             List of dicts with date and fetched_at fields
         """
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                SELECT date, MIN(fetched_at) as fetched_at
-                FROM decisions
-                GROUP BY mgik_id
-                ORDER BY fetched_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
+            cursor = conn.execute("SELECT date, fetched_at FROM decisions")
             return [{"date": row[0], "fetched_at": row[1]} for row in cursor.fetchall()]

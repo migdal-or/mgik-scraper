@@ -6,7 +6,9 @@ Returns coefficient (0.1-1.0) based on how current time matches patterns.
 """
 
 from datetime import datetime
+from datetime import date
 from typing import Dict
+from typing import Union
 import logging
 from datastore import DecisionsDatabase
 
@@ -38,27 +40,26 @@ class PublicationPredictor:
         """
         Calculate prediction coefficient for current datetime.
 
+        Score = sum of historical counts matching current time dimensions.
+        Higher score = more historical activity = higher coefficient.
+        Interval is divided by coefficient (higher coef = shorter interval).
+
         Returns:
-            float: Coefficient between 0.1 (very active) and 1.0 (quiet)
+            float: Coefficient (raw score, minimum 1.0 to avoid division issues)
         """
         current_time = datetime.now()
         patterns = self.analyze_patterns()
 
-        # Calculate match score for current time
         score = self._calculate_match_score(current_time, patterns)
-
-        # Convert score to coefficient (inverse relationship)
-        # High score → low coefficient (check more often)
-        # Low score → high coefficient (check less often)
-        coefficient = max(0.1, 1.0 - (score * 0.9))
+        coefficient = max(1.0, score)
 
         logger.debug(
-            "Prediction: score=%.2f, coefficient=%.2f (hour=%d, dow=%d, dom=%d, doy=%d)",
-            score,
+            "Prediction: coefficient=%.1f (hour=%d, dow=%d, dom=%d, month=%d, doy=%d)",
             coefficient,
             current_time.hour,
             current_time.weekday(),
             current_time.day,
+            current_time.month,
             current_time.timetuple().tm_yday,
         )
 
@@ -78,7 +79,7 @@ class PublicationPredictor:
         - dom: [count1, count2, ..., count31]
         - doy: [count1, count2, ..., count365]
         """
-        timestamps = self.db.get_publication_timestamps(limit=1000)
+        timestamps = self.db.get_publication_timestamps()
 
         decision_patterns = self._build_pattern_dict()
         fetch_patterns = self._build_pattern_dict()
@@ -87,7 +88,8 @@ class PublicationPredictor:
             # Analyze decision publication date
             if item["date"]:
                 try:
-                    decision_dt = datetime.fromisoformat(item["date"])
+                    # item["date"] is typically just a date string "2025-01-15"
+                    decision_dt = date.fromisoformat(item["date"])
                     self._update_pattern(decision_patterns, decision_dt)
                 except (ValueError, TypeError) as e:
                     logger.debug(
@@ -97,6 +99,7 @@ class PublicationPredictor:
             # Analyze when we fetched it
             if item["fetched_at"]:
                 try:
+                    # fetched_at is a full datetime string
                     fetch_dt = datetime.fromisoformat(item["fetched_at"])
                     self._update_pattern(fetch_patterns, fetch_dt)
                 except (ValueError, TypeError) as e:
@@ -104,11 +107,14 @@ class PublicationPredictor:
                         "Failed to parse fetched_at %s: %s", item["fetched_at"], e
                     )
 
+        dec_total = sum(sum(v) for v in decision_patterns.values())
+        fetch_total = sum(sum(v) for v in fetch_patterns.values())
+
         logger.debug(
             "Pattern analysis: %d records, decision_samples=%d, fetch_samples=%d",
             len(timestamps),
-            sum(decision_patterns["hour"]),
-            sum(fetch_patterns["hour"]),
+            dec_total,
+            fetch_total,
         )
 
         return {"decision": decision_patterns, "fetch": fetch_patterns}
@@ -116,47 +122,53 @@ class PublicationPredictor:
     def _build_pattern_dict(self) -> Dict:
         """Create empty pattern distribution dictionary"""
         return {
-            "hour": [0] * 24,  # Hour of day
+            "hour": [0] * 24,  # Hour of day (0-23)
             "dow": [0] * 7,  # Day of week (0=Monday, 6=Sunday)
             "dom": [0] * 31,  # Day of month (1-31)
+            "month": [0] * 12,  # Month of year (1-12)
             "doy": [0] * 366,  # Day of year (1-366, leap year safe)
         }
 
-    def _update_pattern(self, patterns: Dict, dt: datetime):
-        """Increment counters for given datetime"""
-        patterns["hour"][dt.hour] += 1
+    def _update_pattern(self, patterns: Dict, dt: Union[date, datetime]):
+        """
+        Increment counters for given date or datetime.
+
+        For date objects: dow/dom/month/doy are incremented (no hour info).
+        For datetime objects: all fields including hour are incremented.
+        """
+        # Only increment hour patterns if we have datetime with hour info
+        if isinstance(dt, datetime):
+            patterns["hour"][dt.hour] += 1
+
         patterns["dow"][dt.weekday()] += 1
         patterns["dom"][dt.day - 1] += 1  # Convert 1-31 to 0-30
-        patterns["doy"][dt.timetuple().tm_yday - 1] += 1  # Convert 1-366 to 0-365
+        patterns["month"][dt.month - 1] += 1  # Convert 1-12 to 0-11
+        yday = dt.timetuple().tm_yday
+        patterns["doy"][yday - 1] += 1  # Convert 1-366 to 0-365
 
     def _calculate_match_score(self, dt: datetime, patterns: Dict) -> float:
         """
-        Calculate how well current datetime matches historical patterns.
+        Calculate match score by summing counts from BOTH patterns.
 
-        Returns score 0.0 (no match) to 1.0 (perfect match).
+        Uses both decision patterns (when published) and fetch patterns (when discovered).
+        For each dimension, sum the counts from both patterns.
 
-        Weighted average of:
-        - Hour match (40%): Current hour activity vs max
-        - Day-of-week match (20%): Current dow activity vs max
-        - Day-of-month match (20%): Current dom activity vs max
-        - Day-of-year match (20%): Current doy activity vs max
+        Returns:
+            float: Sum of all matching counts
         """
-        # Use decision patterns (when decisions are published)
-        # as primary indicator
         dec = patterns["decision"]
+        fetch = patterns["fetch"]
 
-        # Normalize each dimension (0-1 scale)
-        hour_score = self._normalize(dec["hour"][dt.hour], dec["hour"])
-        dow_score = self._normalize(dec["dow"][dt.weekday()], dec["dow"])
-        dom_score = self._normalize(dec["dom"][dt.day - 1], dec["dom"])
-        doy_score = self._normalize(dec["doy"][dt.timetuple().tm_yday - 1], dec["doy"])
+        hour_count = dec["hour"][dt.hour] + fetch["hour"][dt.hour]
+        dow_count = dec["dow"][dt.weekday()] + fetch["dow"][dt.weekday()]
+        dom_index = dt.day - 1
+        dom_count = dec["dom"][dom_index] + fetch["dom"][dom_index]
+        month_index = dt.month - 1
+        month_count = dec["month"][month_index] + fetch["month"][month_index]
+        yday = dt.timetuple().tm_yday
+        doy_index = yday - 1
+        doy_count = dec["doy"][doy_index] + fetch["doy"][doy_index]
 
-        # Weighted average (hour most important, doy for seasonal patterns)
-        score = hour_score * 0.4 + dow_score * 0.2 + dom_score * 0.2 + doy_score * 0.2
+        score = hour_count + dow_count + dom_count + month_count + doy_count
 
-        return score
-
-    def _normalize(self, value: int, distribution: list) -> float:
-        """Normalize value against distribution (0-1 scale)"""
-        max_val = max(distribution) if distribution else 1
-        return value / max_val if max_val > 0 else 0.0
+        return float(score)
